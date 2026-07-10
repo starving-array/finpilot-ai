@@ -30,3 +30,9 @@ dev = [
 requires = ["setuptools>=61.0.0"]
 build-backend = "setuptools.build_meta"
 
+# Explicit package discovery: only `app/` is a Python package (has __init__.py).
+# `models/` is a binary-artifact data directory (no __init__.py) and must not
+# be treated as a package by setuptools' flat-layout auto-discovery.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
