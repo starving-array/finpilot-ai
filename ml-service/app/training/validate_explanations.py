@@ -123,20 +123,26 @@ def validate_test_b(shap_ranking):
     alt_count = sum(1 for fr in shap_ranking if fr.source == "alternative")
     total = len(shap_ranking)
     if total == 0:
-        FAIL += 1; print("  FAIL: No SHAP features"); return
+        FAIL += 1
+        print("  FAIL: No SHAP features")
+        return
     if alt_count / total >= 0.5:
-        PASS += 1; print(f"  PASS - {alt_count}/{total} alternative ({alt_count/total:.0%})")
+        PASS += 1
+        print(f"  PASS - {alt_count}/{total} alternative ({alt_count/total:.0%})")
     else:
-        FAIL += 1; print(f"  FAIL - {alt_count}/{total} alternative ({alt_count/total:.0%})")
+        FAIL += 1
+        print(f"  FAIL - {alt_count}/{total} alternative ({alt_count/total:.0%})")
 
 
 def validate_test_c(shap_ranking):
     global PASS, FAIL
     neg_count = sum(1 for fr in shap_ranking if fr.shap_value < 0)
     if neg_count >= 1:
-        PASS += 1; print(f"  PASS - {neg_count}/6 features negative SHAP")
+        PASS += 1
+        print(f"  PASS - {neg_count}/6 features negative SHAP")
     else:
-        FAIL += 1; print(f"  FAIL - {neg_count}/6 features negative SHAP")
+        FAIL += 1
+        print(f"  FAIL - {neg_count}/6 features negative SHAP")
 
 
 def validate_test_d(flags):
@@ -144,7 +150,8 @@ def validate_test_d(flags):
     sf = flags.get("seasonality_flags", {}).get("fuel", {})
     flag = sf.get("flag", "")
     if flag == "elevated_but_expected":
-        PASS += 1; print(f"  PASS - fuel volatility flagged 'elevated_but_expected'")
+        PASS += 1
+        print(f"  PASS - fuel volatility flagged 'elevated_but_expected'")
     else:
         print(f"  INFO - fuel volatility flag: '{flag}' ({sf.get('message','')})")
         PASS += 1
@@ -155,9 +162,11 @@ def validate_test_e(flags):
     ep = flags.get("epfo_plausibility", {})
     flag = ep.get("flag", "")
     if "suspicious" in flag:
-        PASS += 1; print(f"  PASS - EPFO flag: '{flag}'")
+        PASS += 1
+        print(f"  PASS - EPFO flag: '{flag}'")
     else:
-        FAIL += 1; print(f"  FAIL - EPFO flag: '{flag}'")
+        FAIL += 1
+        print(f"  FAIL - EPFO flag: '{flag}'")
 
 
 def run_tests(model, explainer, test_profiles):
@@ -219,7 +228,8 @@ def main():
     csv_path = Path(args.csv)
     model_path = Path(args.model)
     if not csv_path.exists() or not model_path.exists():
-        print("ERROR: CSV or model not found"); sys.exit(1)
+        print("ERROR: CSV or model not found")
+        sys.exit(1)
 
     profiles = find_profiles(str(csv_path))
     print(f"Loaded {len(profiles)} profiles")
