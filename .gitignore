@@ -1,0 +1,56 @@
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+*.log
+*.dump
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+logs/
+
+
+# Node / Frontend
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+.eslintcache
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.project
+.classpath
+.settings/
+*.sublime-*
+
+# Generated
+synthetic-data/output/
+ml-service/models/*.joblib
+
+ignorefile

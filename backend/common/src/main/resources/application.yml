@@ -1,0 +1,102 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: fhss-gateway
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fhss}
+    username: ${SPRING_DATASOURCE_USERNAME:fhss}
+    password: ${SPRING_DATASOURCE_PASSWORD:change_me_in_production}
+    hikari:
+      maximum-pool-size: ${HIKARI_MAX_POOL_SIZE:8}
+      minimum-idle: ${HIKARI_MIN_IDLE:2}
+      idle-timeout: ${HIKARI_IDLE_TIMEOUT:30000}
+      connection-timeout: ${HIKARI_CONNECTION_TIMEOUT:30000}
+      max-lifetime: ${HIKARI_MAX_LIFETIME:600000}
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:validate}
+    show-sql: ${JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        dialect: ${JPA_DIALECT:org.hibernate.dialect.PostgreSQLDialect}
+        jdbc:
+          batch_size: ${JPA_JDBC_BATCH_SIZE:20}
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      timeout: ${REDIS_TIMEOUT:2000ms}
+      lettuce:
+        pool:
+          max-active: ${REDIS_POOL_MAX_ACTIVE:8}
+          max-idle: ${REDIS_POOL_MAX_IDLE:4}
+          min-idle: ${REDIS_POOL_MIN_IDLE:2}
+          max-wait: ${REDIS_POOL_MAX_WAIT:2000ms}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:true}
+
+app:
+  ml-service:
+    url: ${ML_SERVICE_URL:http://localhost:8000}
+    timeout-seconds: ${ML_SERVICE_TIMEOUT_SECONDS:5}
+    http-timeout-seconds: ${ML_SERVICE_HTTP_TIMEOUT_SECONDS:10}
+  redis:
+    key-prefix: ${REDIS_KEY_PREFIX:score:}
+    cache-ttl-minutes: ${CACHE_TTL_MINUTES:30}
+  decision:
+    default-reviewer: ${DEFAULT_REVIEWER:underwriter}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: ${CB_SLIDING_WINDOW_SIZE:10}
+        failure-rate-threshold: ${CB_FAILURE_RATE_THRESHOLD:50}
+        wait-duration-in-open-state: ${CB_WAIT_DURATION_OPEN:30s}
+        permitted-number-of-calls-in-half-open-state: ${CB_HALF_OPEN_CALLS:3}
+        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      scoringService:
+        base-config: default
+  timelimiter:
+    instances:
+      scoringService:
+        timeout-duration: ${TL_TIMEOUT_DURATION:4s}
+        cancel-running-future: true
+  retry:
+    instances:
+      scoringService:
+        max-attempts: ${RETRY_MAX_ATTEMPTS:2}
+        wait-duration: ${RETRY_WAIT_DURATION:500ms}
+
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${ACTUATOR_EXPOSED_ENDPOINTS:health,info,prometheus,metrics}
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+logging:
+  pattern:
+    console: '%clr(%d{HH:mm:ss.SSS}){faint} %clr(%5p) %clr([%15.15logger{0}]){cyan} %clr(:){faint} %msg%n%wEx'
+  level:
+    com.idbi.fhss: ${LOG_LEVEL_FHSS:INFO}
+    org.springframework: ${LOG_LEVEL_SPRING:WARN}

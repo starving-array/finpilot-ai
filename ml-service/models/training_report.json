@@ -1,0 +1,13 @@
+{
+  "model_version": "2.0.8",
+  "path": "E:\\project\\DistributedMind-IDBI\\ml-service\\models\\model_2.0.8.joblib",
+  "metrics": {
+    "train_macro_f1": 1.0,
+    "test_macro_f1": 0.8394444444444444,
+    "test_weighted_f1": 0.8375555555555555,
+    "quadratic_weighted_kappa": 0.9326805385556916
+  },
+  "n_train": 280,
+  "n_test": 70,
+  "feature_count": 6
+}

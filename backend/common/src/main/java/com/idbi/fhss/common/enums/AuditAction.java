@@ -1,0 +1,13 @@
+package com.idbi.fhss.common.enums;
+
+public enum AuditAction {
+    CUSTOMER_CREATED,
+    CUSTOMER_UPDATED,
+    DATA_INGESTED,
+    FEATURES_COMPUTED,
+    SCORING_REQUESTED,
+    SCORING_COMPLETED,
+    UNDERWRITER_DECISION,
+    MODEL_DEPLOYED,
+    CONFIG_CHANGED
+}
