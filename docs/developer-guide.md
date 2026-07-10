@@ -1,6 +1,6 @@
 # Developer Guide
 
-**Financial Health Score - Underwriter Console**
+**FinPilot AI — Team DistributedMind**
 
 ---
 
@@ -63,6 +63,32 @@ Other CLI commands:
 ```bash
 python cli.py status    # Health report (git, Docker, APIs)
 python cli.py commit    # Quality-gated commit with conventional commit prompt
+```
+
+---
+
+### Live Logs After `python cli.py dev`
+
+The CLI writes its own log to `logs/cli.log`.
+
+For Docker containers started by the CLI, follow logs in real time:
+
+```bash
+docker compose -f docker/docker-compose.yml logs -f          # all containers
+docker compose -f docker/docker-compose.yml logs -f backend  # single service
+```
+
+The ML service and frontend are launched as background processes with their output suppressed. To see their live output, run them manually in separate terminals instead:
+
+```bash
+# Terminal 2 — ML Service
+cd ml-service
+set MODEL_PATH=models\model_latest.joblib
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Terminal 3 — Frontend
+cd frontend
+npx vite --port 5173
 ```
 
 ---

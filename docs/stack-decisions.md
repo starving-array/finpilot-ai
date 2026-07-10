@@ -1,6 +1,6 @@
 # Technology Stack & Design Decisions
 
-**Financial Health Score - Underwriter Console**
+**FinPilot AI — Team DistributedMind**
 
 ---
 

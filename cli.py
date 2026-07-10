@@ -1,9 +1,12 @@
 """
-FHSS CLI — Unified startup, health, and commit workflow.
+FinPilot AI — CLI
+© 2026 DistributedMind. All rights reserved.
+
 Usage:
     python cli.py dev        # Full project startup
     python cli.py status     # Repository health report
     python cli.py commit     # Quality-gated commit
+    python cli.py test       # Run all test suites
 """
 
 import argparse

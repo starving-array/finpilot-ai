@@ -1,6 +1,6 @@
 # Scoring Logic
 
-**Financial Health Score - Underwriter Console**
+**FinPilot AI — Team DistributedMind**
 
 ---
 

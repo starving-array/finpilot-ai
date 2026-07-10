@@ -1,8 +1,97 @@
-# Financial Health Score - Underwriter Console
+# FinPilot AI
 
-**IDBI Innovate 2026 - Track 03 - Team: DistributedMinds (solo)**
+**Team DistributedMind — IDBI Innovate 2026**
 
-AI-assisted financial health scoring for MSMEs with thin or alternative-only credit histories. Scores into four buckets (disciplined / yes-to-go / non-disciplined / no-to-go) using hand-crafted features from electricity, EPFO, water, and fuel data - not just GST and UPI.
+AI-powered financial intelligence for emerging businesses.
+
+---
+
+## Elevator Pitch
+
+FinPilot AI is an explainable AI platform that helps banks assess the financial health of new-to-credit MSMEs using alternative business signals — electricity consumption, water usage, EPFO contributions, and fuel expenses — alongside traditional financial indicators.
+
+The platform is designed to support underwriters rather than replace them, providing transparent recommendations, confidence scores, and explainable reasoning for every assessment.
+
+---
+
+## Problem Statement & Vision
+
+Traditional credit underwriting heavily depends on financial history such as GST filings, bank statements, UPI activity, and credit bureau reports. Many MSMEs and emerging businesses lack sufficient traditional financial footprints despite operating healthy businesses. As a result, they are often rejected by conventional credit scoring systems.
+
+FinPilot AI addresses this challenge by combining traditional financial indicators with alternative operational signals:
+
+- Electricity consumption
+- Water consumption
+- EPFO contributions
+- Fuel expenses
+- Business activity trends
+
+The platform generates an explainable **Financial Health Score** that assists underwriters in making fairer and more informed lending decisions.
+
+### Core Principles
+
+- Human-in-the-loop decision making
+- Explainability-first AI
+- Support for new-to-credit businesses
+- Transparent confidence scoring
+- Auditability and traceability
+- Modular and extensible architecture
+
+### Mission
+
+Enable financial inclusion by helping lenders recognize healthy businesses that would otherwise be invisible to traditional credit systems.
+
+---
+
+## Architecture
+
+```
+React SPA -> Spring Boot Gateway (Resilience4j) -> FastAPI ML Service
+              |-> Redis cache (30-min TTL)
+              |-> PostgreSQL (profiles + audit log + decisions)
+```
+
+### Layers
+
+| Layer | Technology | Port | Role |
+|-------|-----------|------|------|
+| **Frontend** | React 18 + TypeScript + Vite | 5173 (dev) / 3000 (prod) | Underwriter SPA with 7-state machine |
+| **Gateway** | Spring Boot 3.3 (Java 21) | 8080 | REST API, orchestration, resilience, caching |
+| **ML Service** | FastAPI (Python 3.11) | 8000 | Feature engineering, model inference, SHAP |
+| **Cache** | Redis 7 | internal | Score response cache (30-min TTL) |
+| **Database** | PostgreSQL 16 | internal | Customer profiles, audit log, decisions |
+
+### Core Workflow
+
+```
+Customer Profile
+↓
+Data Validation
+↓
+Data Completeness Check
+↓
+Traditional Data Available?
+├── Yes → Feature Engineering
+└── No  → Blank-Slate Decision Engine
+         ↓
+Feature Engineering (6 features)
+↓
+Feature Validation
+↓
+ML Prediction (GBM)
+↓
+SHAP Explainability
+↓
+Business Rule Validation
+↓
+Confidence Calculation
+↓
+Financial Health Score
+↓
+Audit Logging
+↓
+Underwriter Dashboard
+```
 
 ---
 
@@ -15,39 +104,20 @@ docker compose -f docker/docker-compose.yml up -d
 curl -s -X POST http://localhost:8080/api/v1/score/CUST00042 | jq .
 ```
 
-Frontend at http://localhost:3000 - enter a Customer ID or pick a demo profile.
+Frontend at http://localhost:3000 — enter a Customer ID or pick a demo profile.
 
 One-command CLI alternative: `python cli.py dev`
 
 ---
 
-## What Makes This Different
+## CLI Commands
 
-| Approach | Most Submissions | This System |
-|----------|-----------------|-------------|
-| **Blank-slate scoring** | Impute zeros for missing traditional data | Alt-data drives the score; blank-slate flag changes the narrative for underwriter |
-| **Feature weights** | Generic weights for all business types | Business-type-aware multipliers (fuel = 1.6x for logistics, 0.4x for services) |
-| **Data fairness** | Mix coverage and quality (penalizes submitting weak data) | Separated into coverage + confidence; never penalizes providing more data |
-| **Explainability** | Feature importance bar chart (global) | SHAP per-prediction explanations with source tagging (standard / alternative / mixed) |
-| **Resilience** | Single-point-of-failure | Circuit breaker + Redis cache + audit log fallback chain |
-| **Diagnostic flags** | Score only | EPFO plausibility, loan-to-capacity, seasonality flags |
-
----
-
-## Architecture Overview
-
+```bash
+python cli.py dev        # Full project startup (7 stages)
+python cli.py status     # Repository health report
+python cli.py test       # Run all test suites
+python cli.py commit     # Quality-gated commit
 ```
-React SPA -> Spring Boot Gateway (Resilience4j) -> FastAPI ML Service
-              |-> Redis cache (30-min TTL)
-              |-> PostgreSQL (profiles + audit log)
-```
-
-- **Frontend**: React 18 + TypeScript + Vite (7-state state machine)
-- **Gateway**: Spring Boot 3.3 (Java 21) with Resilience4j circuit breaker
-- **ML Service**: FastAPI (Python) with scikit-learn GBM + SHAP explanations
-- **Cache**: Redis 7 (cache-aside pattern with stale fallback)
-- **Database**: PostgreSQL 16 with Flyway migrations (V8-V10)
-- **Infrastructure**: Docker Compose (5 services with health checks)
 
 ---
 
@@ -65,7 +135,7 @@ React SPA -> Spring Boot Gateway (Resilience4j) -> FastAPI ML Service
 
 ---
 
-## Scoring Logic Summary
+## Scoring Logic
 
 6 features computed from raw profile data:
 
@@ -77,7 +147,7 @@ React SPA -> Spring Boot Gateway (Resilience4j) -> FastAPI ML Service
 | `data_coverage` | 10% | How many alt-data sources present |
 | `evidence_confidence` | 5% | Consistency across payment signals |
 
-**Bucket thresholds**: disciplined >= 0.70, yes-to-go >= 0.50, non-disciplined >= 0.30, no-to-go < 0.30
+**Bucket thresholds**: disciplined ≥ 0.70, yes-to-go ≥ 0.50, non-disciplined ≥ 0.30, no-to-go < 0.30
 
 Business-type-aware signal weights and seasonality handling adjust per sector (manufacturing, logistics, retail, services, trading).
 
@@ -111,9 +181,40 @@ Business-type-aware signal weights and seasonality handling adjust per sector (m
 
 ---
 
+## Repository Structure
+
+```
+backend/
+  common/       Shared DTOs, JPA entities, Flyway migrations, Redis config
+  customer/     Customer profile lookup
+  feature/      Feature module (passive — FE lives in ML service)
+  scoring/      Core scoring service + controllers
+  audit/        Audit log queries
+
+ml-service/
+  app/          FastAPI entrypoint, router, feature engineering, model loader
+  tests/        Pytest suite (92 tests)
+
+frontend/
+  src/          React SPA — App, Layout, SearchBar, ScoreOverview, AuditTrail
+
+synthetic-data/
+  generate_profiles.py   350-customer profile generator
+  label_profiles.py      Composite score → bucket assigner
+  seed.py                Idempotent DB seeding
+
+docs/
+  architecture.md        Full system architecture
+  developer-guide.md     Setup, CLI usage, troubleshooting
+  scoring-logic.md       Complete scoring formulas
+  stack-decisions.md     Technology rationale and design decisions
+```
+
+---
+
 ## Documentation
 
-Detailed documentation is available in the `docs/` directory:
+Detailed documentation in the `docs/` directory:
 
 | Document | Description |
 |----------|-------------|
@@ -124,10 +225,8 @@ Detailed documentation is available in the `docs/` directory:
 
 ---
 
-## Known Limitations
+## License
 
-- **Synthetic data**: 350 generated profiles - not real customer data. Retrain on IDBI sandbox data post-shortlist
-- **SHAP KernelExplainer**: ~30s per prediction (TreeExplainer not fully compatible with multi-class GBM in current SHAP version)
-- **No authentication**: Prototype assumes pre-authenticated corporate network
-- **Single-region**: All services on one host
-- **Dockerfiles run as root**: Acceptable for prototype, add USER directive for production
+All Rights Reserved. © 2026 DistributedMind.
+
+This project is submitted as part of IDBI Innovate 2026. No license is granted for commercial use, reproduction, or distribution without explicit permission.

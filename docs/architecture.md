@@ -1,6 +1,6 @@
 # System Architecture
 
-**Financial Health Score - Underwriter Console**
+**FinPilot AI — Team DistributedMind**
 **IDBI Innovate 2026 - Track 03**
 
 ---
