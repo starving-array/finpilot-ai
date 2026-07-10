@@ -27,7 +27,7 @@ jobs:
       redis:
         image: redis:7-alpine
         ports:
-          - 6379:6379
+          - 16379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -50,7 +50,8 @@ jobs:
           SPRING_DATASOURCE_USERNAME: fhss
           SPRING_DATASOURCE_PASSWORD: fhss_test
           SPRING_DATA_REDIS_HOST: localhost
-          SPRING_DATA_REDIS_PORT: 6379
+          SPRING_DATA_REDIS_PORT: 16379
+
 
   ml-service:
     name: ML Service Lint & Test
