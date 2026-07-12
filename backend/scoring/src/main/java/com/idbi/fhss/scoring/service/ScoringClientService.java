@@ -26,6 +26,7 @@ import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.Objects;
 
 import static java.net.http.HttpClient.Version.HTTP_1_1;
 
@@ -66,14 +67,20 @@ public class ScoringClientService {
 
     @Retry(name = "scoringService", fallbackMethod = "fallbackAfterRetry")
     @CircuitBreaker(name = "scoringService", fallbackMethod = "fallbackAfterCircuitBreaker")
-    public ScoreResponse score(String customerId) {
-        log.info("Scoring customer: {}", customerId);
+    public ScoreResponse score(String customerId, boolean enableSeasonality, Integer referenceMonth) {
+        log.info("Scoring customer: {} (seasonality={})", customerId, enableSeasonality);
+
+        var existing = getCachedResult(customerId);
+        if (existing != null) {
+            log.info("Duplicate score request for {} — returning cached result", customerId);
+            return existing;
+        }
 
         var profile = profileRepo.findByCustomerId(customerId)
                 .orElseThrow(() -> new CustomerNotFoundException(
                     "Customer profile not found: " + customerId));
 
-        var predictRequest = buildPredictRequest(profile);
+        var predictRequest = buildPredictRequest(profile, enableSeasonality, referenceMonth);
         String requestBody;
         try {
             requestBody = objectMapper.writeValueAsString(predictRequest);
@@ -116,9 +123,12 @@ public class ScoringClientService {
                 customerId, mlResult.bucket(), mlResult.probability(),
                 mlResult.compositeScore(), mlResult.features(), mlResult.flags(),
                 mlResult.shapExplanation(), mlResult.modelVersion(),
-                "live", null, UUID.randomUUID().toString().substring(0, 8), Instant.now(),
+                "live", null, UUID.randomUUID().toString(), Instant.now(),
                 profile.getBusinessName(), profile.getOwnerName(),
-                profile.getBusinessType(), profile.getState(), loanAmount
+                profile.getBusinessType(), profile.getState(), loanAmount,
+                mlResult.traditionalSignalContribution(),
+                mlResult.alternativeSignalContribution(),
+                mlResult.seasonalityAdjustment()
         );
 
         persistAudit(result, mlResult);
@@ -127,6 +137,20 @@ public class ScoringClientService {
                 String.format("%.1f", result.probability() * 100), elapsed);
 
         return result;
+    }
+
+    public ScoreResponse fallbackAfterRetry(String customerId, boolean enableSeasonality, Integer referenceMonth, Throwable t) {
+        return fallbackAfterCircuitBreaker(customerId, enableSeasonality, referenceMonth, t);
+    }
+
+    public ScoreResponse fallbackAfterCircuitBreaker(String customerId, boolean enableSeasonality, Integer referenceMonth, Throwable t) {
+        log.warn("Circuit breaker / retries exhausted for {}: {}",
+                customerId, t != null ? t.getMessage() : "unknown");
+
+        if (t instanceof CustomerNotFoundException) {
+            throw (CustomerNotFoundException) t;
+        }
+        return tryCacheFallback(customerId);
     }
 
     public CustomerProfileResponse getCustomerProfile(String customerId) {
@@ -163,30 +187,11 @@ public class ScoringClientService {
                 profile.isBlankSlate(), completeness);
     }
 
-    public ScoreResponse fallbackAfterCircuitBreaker(String customerId, Throwable t) {
-        log.warn("Circuit breaker triggered for {}: {}", customerId,
-                t != null ? t.getMessage() : "unknown");
-
-        if (t instanceof CustomerNotFoundException) {
-            throw (CustomerNotFoundException) t;
-        }
-        return tryCacheFallback(customerId);
-    }
-
-    public ScoreResponse fallbackAfterRetry(String customerId, Throwable t) {
-        log.warn("Retries exhausted for {}: {}", customerId,
-                t != null ? t.getMessage() : "unknown");
-
-        if (t instanceof CustomerNotFoundException) {
-            throw (CustomerNotFoundException) t;
-        }
-        return tryCacheFallback(customerId);
-    }
-
     public List<ScoreResponse> getAuditHistory(String customerId) {
         try {
             return auditRepo.findByCustomerIdOrderByScoredAtDesc(customerId).stream()
                     .map(this::fromAuditEntity)
+                    .filter(Objects::nonNull)
                     .toList();
         } catch (Exception e) {
             log.error("Failed to fetch audit history for {}: {}", customerId, e.getMessage());
@@ -234,7 +239,10 @@ public class ScoringClientService {
                         r.shapExplanation(), r.modelVersion(),
                         "cache-hit", null, r.requestId(), r.scoredAt(),
                         r.businessName(), r.ownerName(), r.businessType(),
-                        r.state(), r.requestedLoanAmount());
+                        r.state(), r.requestedLoanAmount(),
+                        r.traditionalSignalContribution(),
+                        r.alternativeSignalContribution(),
+                        r.seasonalityAdjustment());
             }
         } catch (Exception e) {
             log.warn("Redis read failed for {}: {}", customerId, e.getMessage());
@@ -254,7 +262,7 @@ public class ScoringClientService {
         return null;
     }
 
-    private Map<String, Object> buildPredictRequest(CustomerProfile p) {
+    private Map<String, Object> buildPredictRequest(CustomerProfile p, boolean enableSeasonality, Integer referenceMonth) {
         var map = new LinkedHashMap<String, Object>();
         map.put("customer_id", p.getCustomerId());
         map.put("gst_registered", p.isGstRegistered());
@@ -274,6 +282,10 @@ public class ScoringClientService {
         map.put("requested_loan_amount", nullSafe(p.getRequestedLoanAmount()));
         map.put("years_in_operation", nullSafe(p.getYearsInOperation()));
         map.put("business_type", p.getBusinessType());
+        map.put("enable_seasonality", enableSeasonality);
+        if (referenceMonth != null) {
+            map.put("reference_month", referenceMonth);
+        }
         return map;
     }
 
@@ -302,8 +314,40 @@ public class ScoringClientService {
                 shapExp = parseShap(shapTree);
             }
 
+            var traditionalSignalContribution = result.has("traditional_signal_contribution")
+                    ? result.get("traditional_signal_contribution").asDouble(0.0) : 0.0;
+            var alternativeSignalContribution = result.has("alternative_signal_contribution")
+                    ? result.get("alternative_signal_contribution").asDouble(0.0) : 0.0;
+
+            SeasonalityAdjustment seasonalityAdj = null;
+            var adjTree = result.get("seasonality_adjustment");
+            if (adjTree != null && !adjTree.isNull() && adjTree.get("enabled").asBoolean()) {
+                var triggered = new ArrayList<SeasonalityTriggeredMetric>();
+                var tm = adjTree.get("triggered_metrics");
+                if (tm != null && !tm.isNull()) {
+                    for (var m : tm) {
+                        triggered.add(new SeasonalityTriggeredMetric(
+                                m.get("metric").asText(),
+                                m.get("observed_cv").asDouble(),
+                                m.get("expected_ceiling").asDouble(),
+                                m.get("base_penalty").asDouble(),
+                                m.get("penalty_applied").asDouble(),
+                                m.get("peak_month_discount").asBoolean(),
+                                m.get("reason").asText()));
+                    }
+                }
+                seasonalityAdj = new SeasonalityAdjustment(
+                        true,
+                        adjTree.get("total_penalty_before_cap").asDouble(0.0),
+                        adjTree.get("cap_applied").asBoolean(false),
+                        adjTree.has("seasonality_adjusted_score") && !adjTree.get("seasonality_adjusted_score").isNull()
+                                ? adjTree.get("seasonality_adjusted_score").asDouble() : null,
+                        triggered);
+            }
+
             return new MlResult(customerIdStr, bucket, probability, compositeScore,
-                    features, flags, shapExp, modelVersion);
+                    features, flags, shapExp, modelVersion,
+                    traditionalSignalContribution, alternativeSignalContribution, seasonalityAdj);
         } catch (Exception e) {
             throw new InvalidProfileDataException(
                 "Failed to parse ML response for " + customerId + ": " + e.getMessage());
@@ -313,13 +357,20 @@ public class ScoringClientService {
     private Flags parseFlags(com.fasterxml.jackson.databind.JsonNode f) {
         var isBlankSlate = f.get("is_blank_slate").asBoolean();
 
+        var finCorr = f.has("financial_capacity_corroboration") && !f.get("financial_capacity_corroboration").isNull()
+                ? f.get("financial_capacity_corroboration").asText() : null;
+        var finSrc = f.has("financial_capacity_source") && !f.get("financial_capacity_source").isNull()
+                ? f.get("financial_capacity_source").asText() : null;
+
         var epfo = f.get("epfo_plausibility");
         var epfoFlag = new EpfoPlausibilityFlag(
                 epfo.get("flag").asText(), epfo.get("message").asText(),
                 epfo.has("implied_wage") && !epfo.get("implied_wage").isNull()
                         ? epfo.get("implied_wage").asDouble() : null,
                 epfo.has("employee_count") && !epfo.get("employee_count").isNull()
-                        ? epfo.get("employee_count").asInt() : null);
+                        ? epfo.get("employee_count").asInt() : null,
+                epfo.has("contribution_type") && !epfo.get("contribution_type").isNull()
+                        ? epfo.get("contribution_type").asText() : null);
 
         var cap = f.get("capacity_flag");
         var capFlag = new CapacityFlag(
@@ -330,19 +381,17 @@ public class ScoringClientService {
                         ? cap.get("source").asText() : null);
 
         var seas = f.get("seasonality_flags");
-        var fuel = seas.get("fuel");
-        var elec = seas.get("electricity");
-        var fuelFlag = new SeasonalityFlag(
-                fuel.get("flag").asText(), fuel.get("message").asText(),
-                fuel.has("value") && !fuel.get("value").isNull() ? fuel.get("value").asDouble() : null,
-                parseRange(fuel.get("expected_range")));
-        var elecFlag = new SeasonalityFlag(
-                elec.get("flag").asText(), elec.get("message").asText(),
-                elec.has("value") && !elec.get("value").isNull() ? elec.get("value").asDouble() : null,
-                parseRange(elec.get("expected_range")));
+        SeasonalityFlag fuelFlag = null;
+        if (seas != null && seas.has("fuel") && !seas.get("fuel").isNull()) {
+            var fuel = seas.get("fuel");
+            fuelFlag = new SeasonalityFlag(
+                    fuel.get("flag").asText(), fuel.get("message").asText(),
+                    fuel.has("value") && !fuel.get("value").isNull() ? fuel.get("value").asDouble() : null,
+                    parseRange(fuel.get("expected_range")));
+        }
 
-        return new Flags(isBlankSlate, epfoFlag, capFlag,
-                new SeasonalityFlags(fuelFlag, elecFlag));
+        return new Flags(isBlankSlate, finCorr, finSrc, epfoFlag, capFlag,
+                new SeasonalityFlags(fuelFlag));
     }
 
     private Map<String, Double> parseRange(com.fasterxml.jackson.databind.JsonNode node) {
@@ -360,6 +409,11 @@ public class ScoringClientService {
         var baseVal = s.get("base_value").asDouble();
         var summary = s.get("human_readable_summary").asText();
 
+        var traditionalContrib = s.has("traditional_signal_contribution")
+                ? s.get("traditional_signal_contribution").asDouble(0.0) : 0.0;
+        var alternativeContrib = s.has("alternative_signal_contribution")
+                ? s.get("alternative_signal_contribution").asDouble(0.0) : 0.0;
+
         var ranks = new ArrayList<FeatureRank>();
         var fr = s.get("feature_ranking");
         for (var item : fr) {
@@ -373,7 +427,7 @@ public class ScoringClientService {
                     item.get("source").asText()));
         }
 
-        return new ShapExplanation(shapVals, baseVal, ranks, summary);
+        return new ShapExplanation(shapVals, baseVal, ranks, summary, traditionalContrib, alternativeContrib);
     }
 
     private void persistAudit(ScoreResponse result, MlResult ml) {
@@ -382,6 +436,9 @@ public class ScoringClientService {
             audit.setCustomerId(result.customerId());
             audit.setBucket(result.bucket());
             audit.setConfidence(BigDecimal.valueOf(result.probability()));
+            audit.setCompositeScore(BigDecimal.valueOf(result.compositeScore()));
+            audit.setFeatures(objectMapper.writeValueAsString(result.features()));
+            audit.setRequestId(result.requestId());
             audit.setBlankSlateFlag(result.flags().isBlankSlate());
             audit.setModelVersion(result.modelVersion());
             audit.setShapReasons(objectMapper.writeValueAsString(
@@ -393,6 +450,12 @@ public class ScoringClientService {
             audit.setSeasonalityFlags(objectMapper.writeValueAsString(
                     result.flags().seasonalityFlags() != null ? result.flags().seasonalityFlags() : Map.of()));
             audit.setSource(result.source());
+            audit.setBusinessName(result.businessName());
+            audit.setOwnerName(result.ownerName());
+            audit.setBusinessType(result.businessType());
+            audit.setState(result.state());
+            audit.setRequestedLoanAmount(result.requestedLoanAmount() != null
+                    ? BigDecimal.valueOf(result.requestedLoanAmount()) : null);
             audit.setScoredAt(Instant.now());
             auditRepo.save(audit);
         } catch (Exception e) {
@@ -409,21 +472,26 @@ public class ScoringClientService {
                     : new CapacityFlag("unavailable", "", null, null);
             var epfoFlag = a.getEpfoFlag() != null
                     ? objectMapper.readValue(a.getEpfoFlag(), EpfoPlausibilityFlag.class)
-                    : new EpfoPlausibilityFlag("unavailable", "", null, null);
+                    : new EpfoPlausibilityFlag("unavailable", "", null, null, null);
             var seasFlags = a.getSeasonalityFlags() != null
                     ? objectMapper.readValue(a.getSeasonalityFlags(), SeasonalityFlags.class)
-                    : new SeasonalityFlags(
-                            new SeasonalityFlag("unavailable", "", null, null),
-                            new SeasonalityFlag("unavailable", "", null, null));
+                    : new SeasonalityFlags(null);
 
             var prob = a.getConfidence() != null ? a.getConfidence().doubleValue() : 0.0;
+            var composite = a.getCompositeScore() != null ? a.getCompositeScore().doubleValue() : 0.0;
+            var features = a.getFeatures() != null
+                    ? objectMapper.readValue(a.getFeatures(), LinkedHashMap.class)
+                    : Map.of();
+            var loanAmount = a.getRequestedLoanAmount() != null
+                    ? a.getRequestedLoanAmount().doubleValue() : null;
 
             return new ScoreResponse(
-                    a.getCustomerId(), a.getBucket(), prob, 0.0,
-                    Map.of(), new Flags(a.isBlankSlateFlag(), epfoFlag, capFlag, seasFlags),
+                    a.getCustomerId(), a.getBucket(), prob, composite,
+                    features, new Flags(a.isBlankSlateFlag(), null, null, epfoFlag, capFlag, seasFlags),
                     shapExp, a.getModelVersion(), "cache-fallback", a.getScoredAt(),
-                    "", a.getScoredAt(),
-                    null, null, null, null, null);
+                    a.getRequestId() != null ? a.getRequestId() : "", a.getScoredAt(),
+                    a.getBusinessName(), a.getOwnerName(), a.getBusinessType(),
+                    a.getState(), loanAmount, 0.0, 0.0, null);
         } catch (Exception e) {
             log.warn("Failed to deserialize audit entity for {}: {}", a.getCustomerId(), e.getMessage());
             return null;
@@ -438,5 +506,7 @@ public class ScoringClientService {
             String customerId, String bucket, double probability,
             double compositeScore, Map<String, Double> features,
             Flags flags, ShapExplanation shapExplanation,
-            String modelVersion) {}
+            String modelVersion, double traditionalSignalContribution,
+            double alternativeSignalContribution,
+            SeasonalityAdjustment seasonalityAdjustment) {}
 }

@@ -37,7 +37,7 @@ class ScoreControllerTest {
     @Test
     void score_shouldReturn200() throws Exception {
         var response = createScoreResponse();
-        when(scoringClientService.score("CUST00001")).thenReturn(response);
+        when(scoringClientService.score(eq("CUST00001"), anyBoolean(), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/score/{customerId}", "CUST00001"))
                 .andExpect(status().isOk())
@@ -47,8 +47,20 @@ class ScoreControllerTest {
     }
 
     @Test
+    void score_shouldReturn200WithSeasonality() throws Exception {
+        var response = createScoreResponse();
+        when(scoringClientService.score(eq("CUST00001"), eq(true), any())).thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/score/{customerId}", "CUST00001")
+                        .param("enableSeasonality", "true")
+                        .param("referenceMonth", "6"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerId").value("CUST00001"));
+    }
+
+    @Test
     void score_shouldReturn404WhenCustomerNotFound() throws Exception {
-        when(scoringClientService.score("UNKNOWN"))
+        when(scoringClientService.score(eq("UNKNOWN"), anyBoolean(), any()))
                 .thenThrow(new CustomerNotFoundException("UNKNOWN"));
 
         mockMvc.perform(post("/api/v1/score/{customerId}", "UNKNOWN"))
@@ -57,7 +69,7 @@ class ScoreControllerTest {
 
     @Test
     void score_shouldReturn503WhenServiceUnavailable() throws Exception {
-        when(scoringClientService.score("CUST99999"))
+        when(scoringClientService.score(eq("CUST99999"), anyBoolean(), any()))
                 .thenThrow(new ScoringServiceUnavailableException("ML service down"));
 
         mockMvc.perform(post("/api/v1/score/{customerId}", "CUST99999"))
@@ -163,18 +175,18 @@ class ScoreControllerTest {
         return new ScoreResponse(
                 "CUST00001", "disciplined", 0.85, 0.78,
                 Map.of("payment_regularity", 0.9),
-                new ScoreResponse.Flags(false,
+                new ScoreResponse.Flags(false, null, null,
                         new ScoreResponse.EpfoPlausibilityFlag("plausible", "OK", 15000.0, 10),
                         new ScoreResponse.CapacityFlag("normal", "OK", 0.4, "gst"),
                         new ScoreResponse.SeasonalityFlags(
-                                new ScoreResponse.SeasonalityFlag("normal", "OK", 0.2, null),
-                                new ScoreResponse.SeasonalityFlag("normal", "OK", 0.1, null))),
+                                new ScoreResponse.SeasonalityFlag("normal", "OK", 0.2, null))),
                 new ScoreResponse.ShapExplanation(
                         Map.of("payment_regularity", 0.3), 0.5,
                         List.of(new ScoreResponse.FeatureRank("payment_regularity", 0.9, 0.3, 1,
                                 "positive", "Good payment", "standard")),
-                        "Summary"),
+                        "Summary", 0.0, 0.0),
                 "2.0.0", "live", null, "req-001", Instant.now(),
-                "Test Business", "Owner", "retail", "Maharashtra", 500000.0);
+                "Test Business", "Owner", "retail", "Maharashtra", 500000.0,
+                0.0, 0.0, null);
     }
 }

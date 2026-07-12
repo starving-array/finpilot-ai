@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime
 
 import numpy as np
 from fastapi import APIRouter, HTTPException
@@ -16,22 +17,38 @@ from .schemas import (
     PredictRequest,
     PredictResponse,
     ScoreResult,
+    SeasonalityAdjustment,
     SeasonalityFlagValue,
     SeasonalityFlags,
+    SeasonalityTriggeredMetric,
     ShapExplanation,
 )
+from .seasonality import compute_seasonality_penalty
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 CATEGORY_ORDER = C.CATEGORY_ORDER
 
+BUSINESS_TYPE_MAP = {
+    "gst_monthly_turnover_avg": "gst_monthly_turnover_avg",
+    "gst_filing_regularity": "gst_filing_regularity",
+    "electricity_monthly_units_avg": "electricity_monthly_units_avg",
+    "electricity_payment_delay_days_avg": "electricity_payment_delay_days_avg",
+    "epfo_contribution_regularity": "epfo_contribution_regularity",
+    "epfo_employee_count": "epfo_employee_count",
+    "water_monthly_consumption_kl": "water_monthly_consumption_kl",
+    "water_payment_delay_days_avg": "water_payment_delay_days_avg",
+    "fuel_monthly_spend_avg": "fuel_monthly_spend_avg",
+    "fuel_spend_volatility": "fuel_spend_volatility",
+}
+
 
 @router.post("/predict", response_model=PredictResponse)
 async def predict_endpoint(request: PredictRequest):
     request_id = str(uuid.uuid4())[:8]
 
-    logger.info(f"Predict request received: customer_id={request.customer_id}, business_type={request.business_type}, gst_registered={request.gst_registered}")
+    logger.info(f"Predict request received: customer_id={request.customer_id}, business_type={request.business_type}, enable_seasonality={request.enable_seasonality}")
 
     if not model_manager.is_loaded():
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -84,6 +101,32 @@ async def predict_endpoint(request: PredictRequest):
             + C.COMPOSITE_WEIGHTS["data_coverage"] * features["data_coverage"]
             + C.COMPOSITE_WEIGHTS["evidence_confidence"] * features["evidence_confidence"]
         ), 4)
+        composite_score = max(composite_score, 0.0)
+
+        seasonality_adjustment = None
+        if request.enable_seasonality:
+            reference_month = request.reference_month if request.reference_month is not None else datetime.now().month
+            observed_cvs = _build_observed_cvs(request, flags)
+            penalty_result = compute_seasonality_penalty(
+                observed_cvs, request.business_type, reference_month,
+            )
+            if penalty_result["total_penalty"] > 0:
+                adjusted_score = round(max(composite_score - penalty_result["total_penalty"], 0.0), 4)
+                seasonality_adjustment = SeasonalityAdjustment(
+                    enabled=True,
+                    total_penalty_before_cap=round(
+                        sum(m["penalty_applied"] for m in penalty_result["triggered_metrics"]), 4
+                    ),
+                    cap_applied=penalty_result["total_penalty"] < sum(
+                        m["penalty_applied"] for m in penalty_result["triggered_metrics"]
+                    ),
+                    seasonality_adjusted_score=adjusted_score,
+                    triggered_metrics=[
+                        SeasonalityTriggeredMetric(**m) for m in penalty_result["triggered_metrics"]
+                    ],
+                )
+            else:
+                seasonality_adjustment = SeasonalityAdjustment(enabled=True)
 
         shap_result = compute_shap(explainer, model, feature_vector, flags["is_blank_slate"], request.business_type)
 
@@ -98,6 +141,11 @@ async def predict_endpoint(request: PredictRequest):
                 alternative_signal_contribution=shap_result.get("alternative_signal_contribution", 0.0),
             )
 
+        seasonality_flags = SeasonalityFlags()
+        fuel_flag = flags.get("seasonality_flags", {}).get("fuel")
+        if fuel_flag is not None:
+            seasonality_flags.fuel = SeasonalityFlagValue(**fuel_flag)
+
         result = ScoreResult(
             customer_id=request.customer_id,
             bucket=bucket,
@@ -106,17 +154,17 @@ async def predict_endpoint(request: PredictRequest):
             features=features,
             flags=FeatureFlags(
                 is_blank_slate=flags["is_blank_slate"],
+                financial_capacity_corroboration=flags.get("financial_capacity_corroboration"),
+                financial_capacity_source=flags.get("financial_capacity_source"),
                 epfo_plausibility=EpfoPlausibilityFlag(**flags["epfo_plausibility"]),
                 capacity_flag=CapacityFlag(**flags["capacity_flag"]),
-                seasonality_flags=SeasonalityFlags(
-                    fuel=SeasonalityFlagValue(**flags["seasonality_flags"]["fuel"]),
-                    electricity=SeasonalityFlagValue(**flags["seasonality_flags"]["electricity"]),
-                ),
+                seasonality_flags=seasonality_flags,
             ),
             shap_explanation=shap_explanation,
             model_version=model_manager.model_version,
             traditional_signal_contribution=shap_result.get("traditional_signal_contribution", 0.0) if shap_result else 0.0,
             alternative_signal_contribution=shap_result.get("alternative_signal_contribution", 0.0) if shap_result else 0.0,
+            seasonality_adjustment=seasonality_adjustment,
         )
 
         return PredictResponse(
@@ -139,6 +187,46 @@ async def predict_endpoint(request: PredictRequest):
         )
 
 
+def _estimate_cv_from_norm(value, p90):
+    if p90 is None or p90 <= 0 or value is None:
+        return None
+    norm = p90 * 0.4  # median estimate for right-skewed distributions
+    if norm <= 0:
+        return None
+    return abs(value - norm) / norm
+
+
+def _build_observed_cvs(request, flags):
+    cvs = {}
+
+    if request.fuel_spend_volatility is not None:
+        cvs["fuel_monthly_spend_avg"] = float(request.fuel_spend_volatility)
+
+    bt = request.business_type
+    if request.electricity_monthly_units_avg is not None:
+        p90 = C.ELEC_90TH_PERCENTILE.get(bt, C.DEFAULT_ELEC_PERCENTILE)
+        cv = _estimate_cv_from_norm(request.electricity_monthly_units_avg, p90)
+        if cv is not None:
+            cvs["electricity_monthly_units_avg"] = round(cv, 4)
+
+    if request.gst_monthly_turnover_avg is not None:
+        p90 = C.TURNOVER_90TH_PERCENTILE.get(bt, C.DEFAULT_TURNOVER_PERCENTILE)
+        cv = _estimate_cv_from_norm(request.gst_monthly_turnover_avg, p90)
+        if cv is not None:
+            cvs["gst_monthly_turnover_avg"] = round(cv, 4)
+
+    if request.water_monthly_consumption_kl is not None:
+        cv = _estimate_cv_from_norm(request.water_monthly_consumption_kl, request.electricity_monthly_units_avg / 3 if request.electricity_monthly_units_avg else None)
+        if cv is not None:
+            cvs["water_monthly_consumption_kl"] = round(cv, 4)
+
+    if request.epfo_employee_count is not None and request.gst_monthly_turnover_avg is not None:
+        implied_cv = abs(request.epfo_employee_count - 5.0) / 5.0 if request.epfo_employee_count > 0 else 0.0
+        cvs["epfo_employee_count"] = round(min(implied_cv, 2.0), 4)
+
+    return cvs
+
+
 @router.get("/health")
 async def health():
     from fastapi.responses import JSONResponse
@@ -159,6 +247,7 @@ async def health():
         "model_version": model_manager.model_version,
         "model_loaded": True,
         "shap_loaded": explainer is not None,
+        "model_type": model_manager.get_model_type(),
     }
 
 

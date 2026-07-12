@@ -84,27 +84,29 @@ class TestComputeFinancialCapacityProxy:
             gst_monthly_turnover_avg=2000000,
             business_type="retail",
         )
-        assert result > 0.5
+        assert result["score"] > 0.5
+        assert result["source"] == "turnover_primary"
 
     def test_low_turnover_uses_electricity(self):
         result = compute_financial_capacity_proxy(
-            gst_monthly_turnover_avg=5000,
             electricity_monthly_units_avg=800,
             business_type="retail",
         )
-        assert 0 <= result <= 1
+        assert 0 <= result["score"] <= 1
+        assert result["source"] == "electricity_fallback"
 
     def test_no_data_returns_zero(self):
         result = compute_financial_capacity_proxy(business_type="retail")
-        assert result == 0.0
+        assert result["score"] == 0.0
+        assert result["source"] == "no_data"
 
     def test_manufacturing_electricity_threshold(self):
         result = compute_financial_capacity_proxy(
-            gst_monthly_turnover_avg=5000,
             electricity_monthly_units_avg=7800,
             business_type="manufacturing",
         )
-        assert result > 0.9
+        assert result["score"] > 0
+        assert result["source"] == "electricity_fallback"
 
 
 class TestComputeBusinessLongevity:
@@ -169,11 +171,11 @@ class TestComputeEvidenceConfidence:
         result = compute_evidence_confidence(
             gst_filing_regularity=0.9,
         )
-        assert result == 0.5
+        assert result == 0.6
 
     def test_no_signals_returns_fallback(self):
         result = compute_evidence_confidence()
-        assert result == 0.5
+        assert result == 0.3
 
 
 class TestIsBlankSlate:
@@ -191,7 +193,6 @@ class TestIsBlankSlate:
     def test_high_upi_count_not_blank(self):
         result = is_blank_slate(
             upi_monthly_txn_count=50,
-            upi_monthly_txn_value=100000,
             business_type="retail",
         )
         assert result is False

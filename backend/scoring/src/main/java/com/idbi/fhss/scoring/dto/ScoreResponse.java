@@ -23,11 +23,16 @@ public record ScoreResponse(
     @JsonProperty("owner_name") String ownerName,
     @JsonProperty("business_type") String businessType,
     String state,
-    @JsonProperty("requested_loan_amount") Double requestedLoanAmount
+    @JsonProperty("requested_loan_amount") Double requestedLoanAmount,
+    @JsonProperty("traditional_signal_contribution") double traditionalSignalContribution,
+    @JsonProperty("alternative_signal_contribution") double alternativeSignalContribution,
+    @JsonProperty("seasonality_adjustment") SeasonalityAdjustment seasonalityAdjustment
 ) {
 
     public record Flags(
         @JsonProperty("is_blank_slate") boolean isBlankSlate,
+        @JsonProperty("financial_capacity_corroboration") String financialCapacityCorroboration,
+        @JsonProperty("financial_capacity_source") String financialCapacitySource,
         @JsonProperty("epfo_plausibility") EpfoPlausibilityFlag epfoPlausibility,
         @JsonProperty("capacity_flag") CapacityFlag capacityFlag,
         @JsonProperty("seasonality_flags") SeasonalityFlags seasonalityFlags
@@ -37,7 +42,8 @@ public record ScoreResponse(
         String flag,
         String message,
         @JsonProperty("implied_wage") Double impliedWage,
-        @JsonProperty("employee_count") Integer employeeCount
+        @JsonProperty("employee_count") Integer employeeCount,
+        @JsonProperty("contribution_type") String contributionType
     ) {}
 
     public record CapacityFlag(
@@ -48,8 +54,7 @@ public record ScoreResponse(
     ) {}
 
     public record SeasonalityFlags(
-        SeasonalityFlag fuel,
-        SeasonalityFlag electricity
+        @JsonProperty("fuel") SeasonalityFlag fuel
     ) {}
 
     public record SeasonalityFlag(
@@ -59,11 +64,31 @@ public record ScoreResponse(
         @JsonProperty("expected_range") Map<String, Double> expectedRange
     ) {}
 
+    public record SeasonalityAdjustment(
+        boolean enabled,
+        @JsonProperty("total_penalty_before_cap") double totalPenaltyBeforeCap,
+        @JsonProperty("cap_applied") boolean capApplied,
+        @JsonProperty("seasonality_adjusted_score") Double seasonalityAdjustedScore,
+        @JsonProperty("triggered_metrics") List<SeasonalityTriggeredMetric> triggeredMetrics
+    ) {}
+
+    public record SeasonalityTriggeredMetric(
+        String metric,
+        @JsonProperty("observed_cv") double observedCv,
+        @JsonProperty("expected_ceiling") double expectedCeiling,
+        @JsonProperty("base_penalty") double basePenalty,
+        @JsonProperty("penalty_applied") double penaltyApplied,
+        @JsonProperty("peak_month_discount") boolean peakMonthDiscount,
+        String reason
+    ) {}
+
     public record ShapExplanation(
         @JsonProperty("shap_values") Map<String, Double> shapValues,
         @JsonProperty("base_value") double baseValue,
         @JsonProperty("feature_ranking") List<FeatureRank> featureRanking,
-        @JsonProperty("human_readable_summary") String humanReadableSummary
+        @JsonProperty("human_readable_summary") String humanReadableSummary,
+        @JsonProperty("traditional_signal_contribution") double traditionalSignalContribution,
+        @JsonProperty("alternative_signal_contribution") double alternativeSignalContribution
     ) {}
 
     public record FeatureRank(

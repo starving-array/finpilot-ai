@@ -34,7 +34,7 @@ def _log(level, message, **extra):
     if extra:
         line += " " + json.dumps(extra)
     print(line, file=sys.stderr)
-    with open(LOG_FILE, "a") as f:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 

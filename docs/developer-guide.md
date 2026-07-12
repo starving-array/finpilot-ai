@@ -45,6 +45,23 @@ cp .env.example .env
 python cli.py dev
 ```
 
+### Alternative: Docker-Only (no local Python/Java/Node)
+
+```bash
+cp .env.example .env
+docker compose -f docker/docker-compose.yml up -d
+# Frontend at http://localhost:3000
+# Score a demo customer:
+curl -s -X POST http://localhost:8080/api/v1/score/CUST00042 | jq .
+```
+
+### Production: Pre-built Images from GHCR
+
+```bash
+export GHCR_NAMESPACE=your-org
+docker compose -f docker/docker-compose.prod.yml up -d
+```
+
 The CLI handles the full 7-step startup:
 1. Environment check (Python, Docker, Node)
 2. Start infrastructure (PostgreSQL + Redis via Docker)

@@ -7,6 +7,7 @@ class EpfoPlausibilityFlag(BaseModel):
     message: str
     implied_wage: Optional[float] = None
     employee_count: Optional[int] = None
+    contribution_type: Optional[str] = None
 
 
 class CapacityFlag(BaseModel):
@@ -24,15 +25,38 @@ class SeasonalityFlagValue(BaseModel):
 
 
 class SeasonalityFlags(BaseModel):
-    fuel: SeasonalityFlagValue
-    electricity: SeasonalityFlagValue
+    fuel: Optional[SeasonalityFlagValue] = None
+    electricity: Optional[SeasonalityFlagValue] = None
+    gst: Optional[SeasonalityFlagValue] = None
+    water: Optional[SeasonalityFlagValue] = None
+    epfo: Optional[SeasonalityFlagValue] = None
 
 
 class FeatureFlags(BaseModel):
     is_blank_slate: bool
+    financial_capacity_corroboration: Optional[str] = None
+    financial_capacity_source: Optional[str] = None
     epfo_plausibility: EpfoPlausibilityFlag
     capacity_flag: CapacityFlag
     seasonality_flags: SeasonalityFlags
+
+
+class SeasonalityTriggeredMetric(BaseModel):
+    metric: str
+    observed_cv: float
+    expected_ceiling: float
+    base_penalty: float
+    penalty_applied: float
+    peak_month_discount: bool
+    reason: str
+
+
+class SeasonalityAdjustment(BaseModel):
+    enabled: bool
+    total_penalty_before_cap: float = 0.0
+    cap_applied: bool = False
+    seasonality_adjusted_score: Optional[float] = None
+    triggered_metrics: list[SeasonalityTriggeredMetric] = []
 
 
 class PredictRequest(BaseModel):
@@ -53,7 +77,9 @@ class PredictRequest(BaseModel):
     fuel_spend_volatility: Optional[float] = None
     requested_loan_amount: Optional[float] = None
     years_in_operation: Optional[float] = None
-    business_type: str = Field(default="retail", description="manufacturing|logistics|retail|services|trading")
+    business_type: str = Field(default="retail", description="manufacturing|logistics|retail|services|trading|food_and_beverage|agriculture|construction")
+    enable_seasonality: bool = Field(default=False, description="Apply seasonality adjustment")
+    reference_month: Optional[int] = Field(default=None, description="Month (1-12) for seasonality calculation, defaults to current")
 
 
 class FeatureRank(BaseModel):
@@ -86,6 +112,7 @@ class ScoreResult(BaseModel):
     model_version: str
     traditional_signal_contribution: float = 0.0
     alternative_signal_contribution: float = 0.0
+    seasonality_adjustment: Optional[SeasonalityAdjustment] = None
 
 
 class PredictResponse(BaseModel):

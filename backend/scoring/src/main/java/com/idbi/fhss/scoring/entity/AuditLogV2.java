@@ -54,6 +54,31 @@ public class AuditLogV2 {
     @Column(length = 20, nullable = false)
     private String source;
 
+    @Column(name = "composite_score", precision = 5, scale = 4)
+    private BigDecimal compositeScore;
+
+    @Column(name = "features")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String features;
+
+    @Column(name = "request_id", length = 16)
+    private String requestId;
+
+    @Column(name = "business_name", length = 200)
+    private String businessName;
+
+    @Column(name = "owner_name", length = 200)
+    private String ownerName;
+
+    @Column(name = "business_type", length = 50)
+    private String businessType;
+
+    @Column(length = 50)
+    private String state;
+
+    @Column(name = "requested_loan_amount", precision = 14, scale = 2)
+    private BigDecimal requestedLoanAmount;
+
     @Column(name = "scored_at", nullable = false, updatable = false)
     private Instant scoredAt;
 
@@ -79,6 +104,22 @@ public class AuditLogV2 {
     public void setSeasonalityFlags(String seasonalityFlags) { this.seasonalityFlags = seasonalityFlags; }
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }
+    public BigDecimal getCompositeScore() { return compositeScore; }
+    public void setCompositeScore(BigDecimal compositeScore) { this.compositeScore = compositeScore; }
+    public String getFeatures() { return features; }
+    public void setFeatures(String features) { this.features = features; }
+    public String getRequestId() { return requestId; }
+    public void setRequestId(String requestId) { this.requestId = requestId; }
+    public String getBusinessName() { return businessName; }
+    public void setBusinessName(String businessName) { this.businessName = businessName; }
+    public String getOwnerName() { return ownerName; }
+    public void setOwnerName(String ownerName) { this.ownerName = ownerName; }
+    public String getBusinessType() { return businessType; }
+    public void setBusinessType(String businessType) { this.businessType = businessType; }
+    public String getState() { return state; }
+    public void setState(String state) { this.state = state; }
+    public BigDecimal getRequestedLoanAmount() { return requestedLoanAmount; }
+    public void setRequestedLoanAmount(BigDecimal requestedLoanAmount) { this.requestedLoanAmount = requestedLoanAmount; }
     public Instant getScoredAt() { return scoredAt; }
     public void setScoredAt(Instant scoredAt) { this.scoredAt = scoredAt; }
 }

@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """
-Read profiles.csv → compute composite score → assign bucket → validate distribution.
-Formula from new_architecture.md Section 5.6.
-
-Usage: python label_profiles.py [--input output/profiles.csv] [--output output/profiles_labeled.csv]
+Read profiles.csv → compute features via feature_engineering → composite score → assign bucket → validate.
 """
-
 import argparse
 import csv
-import math
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -18,28 +14,28 @@ from sklearn.metrics import precision_score
 
 import config as C
 
+FEATURE_ENGINEERING_PATH = str(Path(__file__).resolve().parent.parent / "ml-service")
+if FEATURE_ENGINEERING_PATH not in sys.path:
+    sys.path.insert(0, FEATURE_ENGINEERING_PATH)
+
+from app.feature_engineering import (
+    safe_float,
+    safe_float_or_none,
+    compute_all_features,
+    FEATURE_NAMES,
+)
+
 BUCKET_THRESHOLDS = C.BUCKET_THRESHOLDS
 
 
-def safe_float(val, default=0.0):
-    if val is None or val == "" or val == "None":
-        return default
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return default
+def assign_bucket(composite_score):
+    for bucket, threshold in BUCKET_THRESHOLDS:
+        if composite_score >= threshold:
+            return bucket
+    return "no-to-go"
 
 
-def safe_int(val, default=None):
-    if val is None or val == "" or val == "None":
-        return default
-    try:
-        return int(float(val))
-    except (ValueError, TypeError):
-        return default
-
-
-def pick_signal_keys(p: dict) -> list:
+def pick_signal_keys(p):
     keys = []
     if safe_float(p.get("gst_filing_regularity"), -1) >= 0:
         keys.append("gst")
@@ -52,121 +48,37 @@ def pick_signal_keys(p: dict) -> list:
     return keys
 
 
-def compute_payment_regularity(p: dict, business_type: str) -> float:
-    signals = []
-    signal_keys = []
-
-    gst_reg = safe_float(p.get("gst_filing_regularity"), -1)
-    if gst_reg >= 0:
-        signals.append(gst_reg)
-        signal_keys.append("gst")
-
-    epfo_reg = safe_float(p.get("epfo_contribution_regularity"), -1)
-    if epfo_reg >= 0:
-        signals.append(epfo_reg)
-        signal_keys.append("epfo")
-
-    elec_delay = safe_float(p.get("electricity_payment_delay_days_avg"), -1)
-    if elec_delay >= 0:
-        norm_delay = elec_delay / C.DELAY_DENOMINATOR_DAYS
-        signals.append(max(C.MIN_SIGNAL_FLOOR, 1.0 / (1.0 + C.SMOOTHING_FACTOR * norm_delay)))
-        signal_keys.append("electricity")
-
-    water_delay = safe_float(p.get("water_payment_delay_days_avg"), -1)
-    if water_delay >= 0:
-        norm_delay = water_delay / C.DELAY_DENOMINATOR_DAYS
-        signals.append(max(C.MIN_SIGNAL_FLOOR, 1.0 / (1.0 + C.SMOOTHING_FACTOR * norm_delay)))
-        signal_keys.append("water")
-
-    if not signals:
-        return 0.0
-
-    weights = C.SIGNAL_WEIGHTS.get(business_type, {})
-    weighted = [s * weights.get(k, 1.0) for s, k in zip(signals, signal_keys)]
-    total_weight = sum(weights.get(k, 1.0) for k in signal_keys)
-    normalized = [ws / total_weight * len(signals) for ws in weighted]
-
-    return float(np.mean(normalized))
-
-
-def compute_financial_capacity(p: dict, business_type: str) -> float:
-    turnover = safe_float(p.get("gst_monthly_turnover_avg"))
-    if turnover is not None and turnover >= C.GST_TURNOVER_THRESHOLD:
-        return min(math.sqrt(turnover) / C.FINANCIAL_CAPACITY_SQRT_DIVISOR, 1.0)
-    units = safe_float(p.get("electricity_monthly_units_avg"))
-    percentile = C.ELEC_90TH_PERCENTILE.get(business_type, C.DEFAULT_ELEC_PERCENTILE)
-    return min(units / percentile, 1.0)
-
-
-def compute_data_coverage(p: dict) -> float:
-    present = 0.0
-    for cols in C.DATA_GROUPS.values():
-        if any(safe_float(p.get(c), -1) >= 0 for c in cols):
-            present += C.DATA_GROUP_WEIGHT
-    return present
-
-
-def compute_evidence_confidence(p: dict) -> float:
-    signals = []
-    gst_reg = safe_float(p.get("gst_filing_regularity"), -1)
-    if gst_reg >= 0:
-        signals.append(gst_reg)
-    epfo_reg = safe_float(p.get("epfo_contribution_regularity"), -1)
-    if epfo_reg >= 0:
-        signals.append(epfo_reg)
-    elec_delay = safe_float(p.get("electricity_payment_delay_days_avg"), -1)
-    if elec_delay >= 0:
-        norm_delay = elec_delay / C.DELAY_DENOMINATOR_DAYS
-        signals.append(max(C.MIN_SIGNAL_FLOOR, 1.0 / (1.0 + C.SMOOTHING_FACTOR * norm_delay)))
-    water_delay = safe_float(p.get("water_payment_delay_days_avg"), -1)
-    if water_delay >= 0:
-        norm_delay = water_delay / C.DELAY_DENOMINATOR_DAYS
-        signals.append(max(C.MIN_SIGNAL_FLOOR, 1.0 / (1.0 + C.SMOOTHING_FACTOR * norm_delay)))
-
-    if len(signals) < C.MIN_SIGNALS_FOR_CONFIDENCE:
-        return C.EVIDENCE_CONFIDENCE_FALLBACK
-
-    arr = np.array(signals)
-    mean = arr.mean()
-    std = arr.std()
-    cv = std / mean if mean > 0 else 1.0
-    return float(min(1.0 - cv, 1.0))
-
-
-def compute_business_longevity(p: dict, payment_regularity: float, data_coverage: float) -> float:
-    years = safe_float(p.get("years_in_operation"))
-    raw = min(years / C.LONGEVITY_SCALE_YEARS, 1.0)
-    if years < C.LONGEVITY_CLIFF_YEARS and payment_regularity >= C.LONGEVITY_PAYMENT_GATE and data_coverage >= C.LONGEVITY_COVERAGE_GATE:
-        floor = C.LONGEVITY_FLOOR_FACTOR * (1.0 - years / C.LONGEVITY_CLIFF_YEARS)
-        raw = max(raw, floor)
-    return raw
-
-
-def compute_composite_score(p: dict, business_type: str) -> float:
-    coverage = compute_data_coverage(p)
-    payment_reg = compute_payment_regularity(p, business_type)
-    financial_cap = compute_financial_capacity(p, business_type)
-    longevity = compute_business_longevity(p, payment_reg, coverage)
-    evidence_conf = compute_evidence_confidence(p)
-
+def compute_composite_score(p, business_type):
+    feats, _ = compute_all_features(
+        gst_registered=p.get("gst_registered", "false").lower() in ("true", "1", "yes"),
+        gst_monthly_turnover_avg=safe_float_or_none(p.get("gst_monthly_turnover_avg")),
+        gst_filing_regularity=safe_float_or_none(p.get("gst_filing_regularity")),
+        upi_monthly_txn_count=safe_float_or_none(p.get("upi_monthly_txn_count")),
+        upi_monthly_txn_value=safe_float_or_none(p.get("upi_monthly_txn_value")),
+        electricity_monthly_units_avg=safe_float_or_none(p.get("electricity_monthly_units_avg")),
+        electricity_payment_delay_days_avg=safe_float_or_none(p.get("electricity_payment_delay_days_avg")),
+        epfo_contribution_regularity=safe_float_or_none(p.get("epfo_contribution_regularity")),
+        epfo_employee_count=safe_float_or_none(p.get("epfo_employee_count")),
+        epfo_contribution_amount=safe_float_or_none(p.get("epfo_contribution_amount")),
+        water_monthly_consumption_kl=safe_float_or_none(p.get("water_monthly_consumption_kl")),
+        water_payment_delay_days_avg=safe_float_or_none(p.get("water_payment_delay_days_avg")),
+        fuel_monthly_spend_avg=safe_float_or_none(p.get("fuel_monthly_spend_avg")),
+        fuel_spend_volatility=safe_float_or_none(p.get("fuel_spend_volatility")),
+        requested_loan_amount=safe_float_or_none(p.get("requested_loan_amount")),
+        years_in_operation=safe_float_or_none(p.get("years_in_operation")),
+        business_type=business_type,
+    )
     score = (
-        C.COMPOSITE_WEIGHTS["payment_regularity"] * payment_reg
-        + C.COMPOSITE_WEIGHTS["financial_capacity_proxy"] * financial_cap
-        + C.COMPOSITE_WEIGHTS["business_longevity"] * longevity
-        + C.COMPOSITE_WEIGHTS["data_coverage"] * coverage
-        + C.COMPOSITE_WEIGHTS["evidence_confidence"] * evidence_conf
+        C.COMPOSITE_WEIGHTS["payment_regularity"] * feats["payment_regularity"]
+        + C.COMPOSITE_WEIGHTS["financial_capacity_proxy"] * feats["financial_capacity_proxy"]
+        + C.COMPOSITE_WEIGHTS["business_longevity"] * feats["business_longevity"]
+        + C.COMPOSITE_WEIGHTS["data_coverage"] * feats["data_coverage"]
+        + C.COMPOSITE_WEIGHTS["evidence_confidence"] * feats["evidence_confidence"]
     )
     return round(float(score), 4)
 
 
-def assign_bucket(composite_score: float) -> str:
-    for bucket, threshold in BUCKET_THRESHOLDS:
-        if composite_score >= threshold:
-            return bucket
-    return "no-to-go"
-
-
-def validate_distribution(profiles: list) -> bool:
+def validate_distribution(profiles):
     buckets = Counter(p["bucket"] for p in profiles)
     total = len(profiles)
     all_ok = True
@@ -183,15 +95,15 @@ def validate_distribution(profiles: list) -> bool:
     return all_ok
 
 
-def clip(value: float, lo: float, hi: float) -> float:
+def clip(value, lo, hi):
     return max(lo, min(hi, value))
 
 
-def map_bucket_to_risk(bucket: str) -> float:
+def map_bucket_to_risk(bucket):
     return C.RISK_MAP[bucket]
 
 
-def validate_labels(profiles: list[dict], actual_outcomes: list[float]) -> dict:
+def validate_labels(profiles, actual_outcomes):
     predicted_buckets = [assign_bucket(compute_composite_score(p, p.get("business_type", "retail"))) for p in profiles]
     risk_scores = [map_bucket_to_risk(b) for b in predicted_buckets]
 
@@ -213,36 +125,7 @@ def validate_labels(profiles: list[dict], actual_outcomes: list[float]) -> dict:
     }
 
 
-def compute_label_probabilities(p: dict) -> dict:
-    def _map_to_01(value: float) -> float:
-        return clip(value, 0.0, 1.0)
-
-    repayment_score = _map_to_01(p.get("loan_repayment_history", 0.5) if p.get("loan_repayment_history") else 0.5)
-    vendor_score = _map_to_01(p.get("vendor_payment_discipline", 0.5) if p.get("vendor_payment_discipline") else 0.5)
-    continuity_score = _map_to_01(p.get("business_continuity", 0.5) if p.get("business_continuity") else 0.5)
-
-    weights = {
-        "repayment": 0.5 * 0.6,
-        "vendor": 0.3 * 0.5,
-        "continuity": 0.2 * 0.4,
-    }
-    total_weight = sum(weights.values())
-
-    disciplined_prob = (
-        weights["repayment"] * repayment_score
-        + weights["vendor"] * vendor_score
-        + weights["continuity"] * continuity_score
-    ) / total_weight
-
-    return {
-        "yes_to_go_prob": max(0, disciplined_prob - 0.2),
-        "disciplined_prob": disciplined_prob,
-        "non_disciplined_prob": max(0, 0.5 - disciplined_prob),
-        "no_to_go_prob": max(0, 0.3 - disciplined_prob),
-    }
-
-
-def inject_known_risk_signals(profile: dict) -> float:
+def inject_known_risk_signals(profile):
     risk = 0.0
     t = C.RISK_SIGNAL_THRESHOLDS
 
@@ -263,6 +146,15 @@ def inject_known_risk_signals(profile: dict) -> float:
         risk += C.RISK_SIGNAL_BONUSES["longevity_good"]
 
     return clip(risk, 0.0, 1.0)
+
+
+def safe_int(val, default=None):
+    if val is None or val == "" or val == "None":
+        return default
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
 
 
 def main():

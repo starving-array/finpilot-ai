@@ -7,8 +7,6 @@ interface ScoreOverviewProps {
 
 function formatLoan(amount: number | null): string {
   if (amount == null) return '—'
-  if (amount >= 100000) return '₹' + (amount / 100000).toFixed(1) + ',00,000'
-  if (amount >= 1000) return '₹' + (amount / 1000).toFixed(0) + ',000'
   return '₹' + amount.toLocaleString('en-IN')
 }
 
@@ -87,9 +85,15 @@ export default function ScoreOverview({ result }: ScoreOverviewProps) {
           </div>
         </div>
         <div style={{ fontSize: 12, color: '#5B6675', marginTop: 14, lineHeight: 1.5, borderTop: '1px solid #E2E6EC', paddingTop: 12 }}>
-          {result.flags.is_blank_slate
-            ? 'Blank-slate customer — GST/UPI below materiality threshold. Score is derived primarily from electricity, EPFO and fuel signals.'
-            : 'Full-data customer — GST and UPI signals combined with alternative data for a comprehensive assessment.'}
+          {(() => {
+            const coverage = Object.values(result.features || {}).filter(v => v > 0).length
+            const total = Object.keys(result.features || {}).length
+            const pct = total > 0 ? Math.round(coverage / total * 100) : 0
+            if (result.flags.is_blank_slate) {
+              return `Blank-slate — GST/UPI below threshold. ${coverage}/${total} signals active (${pct}% feature coverage). Score derived from alternative data.`
+            }
+            return `Full-data — ${coverage}/${total} signals active (${pct}% feature coverage). Mix of traditional and alternative data.`
+          })()}
         </div>
       </div>
 
@@ -127,6 +131,14 @@ export default function ScoreOverview({ result }: ScoreOverviewProps) {
               {(FLAG_STYLE[epfoFlag.flag] || FLAG_STYLE.unavailable).label}
             </span>
           </div>
+          {result.seasonality_adjustment?.enabled && result.seasonality_adjustment.seasonality_adjusted_score != null && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, borderTop: '1px solid #E2E6EC', paddingTop: 8 }}>
+              <span style={{ color: '#5B6675' }}>Seasonality adj.</span>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 10, background: '#FEF9ED', color: '#B86B00' }}>
+                {result.seasonality_adjustment.cap_applied ? 'Capped' : 'Applied'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>

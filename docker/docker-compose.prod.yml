@@ -1,0 +1,106 @@
+# Production compose — uses pre-built images from GitHub Container Registry.
+# Set GHCR_NAMESPACE to your GitHub org or username before deploying.
+#   export GHCR_NAMESPACE=my-org
+#   docker compose -f docker/docker-compose.prod.yml up -d
+
+x-common-vars: &common-vars
+  SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+  SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/fhss}
+  SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-fhss}
+  SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+  SPRING_DATA_REDIS_HOST: ${REDIS_HOST:-redis}
+  SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6379}
+  ML_SERVICE_URL: ${ML_SERVICE_URL:-http://ml-service:8000}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fhss-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fhss}
+      POSTGRES_USER: ${POSTGRES_USER:-fhss}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fhss}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: fhss-redis
+    ports: []
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    image: ghcr.io/${GHCR_NAMESPACE:-your-org}/finpilot-backend:${IMAGE_TAG:-latest}
+    container_name: fhss-backend
+    environment:
+      <<: *common-vars
+      SERVER_PORT: ${SERVER_PORT:-8080}
+    ports:
+      - "${GATEWAY_PORT:-8080}:${SERVER_PORT:-8080}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:${SERVER_PORT:-8080}/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  ml-service:
+    image: ghcr.io/${GHCR_NAMESPACE:-your-org}/finpilot-ml-service:${IMAGE_TAG:-latest}
+    container_name: fhss-ml
+    environment:
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      MODEL_PATH: ${MODEL_PATH:-/app/models/model_latest.joblib}
+    ports: []
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    volumes:
+      - ml-models:/app/models
+
+  frontend:
+    image: ghcr.io/${GHCR_NAMESPACE:-your-org}/finpilot-frontend:${IMAGE_TAG:-latest}
+    container_name: fhss-frontend
+    environment:
+      VITE_API_BASE_URL: ""
+      BACKEND_HOST: ${BACKEND_HOST:-backend}
+      BACKEND_PORT: ${SERVER_PORT:-8080}
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  ml-models:

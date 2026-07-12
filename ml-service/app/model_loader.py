@@ -17,9 +17,11 @@ CATEGORY_ORDER = ["no-to-go", "non-disciplined", "yes-to-go", "disciplined"]
 class ModelManager:
     def __init__(self):
         self._model = None
+        self._regressor = None
         self._explainer = None
         self._metadata = {}
         self.model_version = "0.0.0"
+        self._model_type = "unknown"
 
     def load(self, path: str | None = None):
         model_path = path or settings.model_path
@@ -33,11 +35,15 @@ class ModelManager:
         artifact = joblib.load(model_path)
         if isinstance(artifact, dict):
             self._model = artifact.get("model")
+            self._regressor = artifact.get("regressor")
             self.model_version = artifact.get("version", "0.0.0")
+            self._model_type = artifact.get("model_type", "unknown")
             self._metadata = artifact.get("metadata", {})
         else:
             self._model = artifact
+            self._regressor = None
             self.model_version = "1.0.0"
+            self._model_type = "legacy"
             self._metadata = {}
 
         if self._model is None:
@@ -57,9 +63,8 @@ class ModelManager:
 
     def _load_explainer(self):
         try:
-            background = np.random.default_rng(42).random((20, 6)) * 0.5 + 0.5
-            self._explainer = shap.KernelExplainer(self._model.predict_proba, background)
-            logger.info("SHAP KernelExplainer loaded (20 background samples)")
+            self._explainer = shap.TreeExplainer(self._model)
+            logger.info("SHAP TreeExplainer loaded")
         except Exception as e:
             logger.warning(f"SHAP explainer loading failed: {e}. Explanations will be unavailable.")
             self._explainer = None
@@ -72,6 +77,12 @@ class ModelManager:
 
     def get_explainer(self):
         return self._explainer
+
+    def get_regressor(self):
+        return self._regressor
+
+    def get_model_type(self):
+        return self._model_type
 
     def get_metadata(self):
         return self._metadata

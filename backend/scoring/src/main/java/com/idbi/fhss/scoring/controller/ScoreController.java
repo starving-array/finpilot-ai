@@ -10,10 +10,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/api/v1")
 public class ScoreController {
+
+    private static final Pattern CUSTOMER_ID_PATTERN = Pattern.compile("^CUST\\d{5}$");
 
     private final ScoringClientService scoringClientService;
     private final DecisionService decisionService;
@@ -24,8 +27,14 @@ public class ScoreController {
     }
 
     @PostMapping("/score/{customerId}")
-    public ResponseEntity<ScoreResponse> score(@PathVariable String customerId) {
-        var response = scoringClientService.score(customerId);
+    public ResponseEntity<ScoreResponse> score(
+            @PathVariable String customerId,
+            @RequestParam(defaultValue = "false") boolean enableSeasonality,
+            @RequestParam(required = false) Integer referenceMonth) {
+        if (!CUSTOMER_ID_PATTERN.matcher(customerId).matches()) {
+            throw new IllegalArgumentException("Invalid customerId format: " + customerId);
+        }
+        var response = scoringClientService.score(customerId, enableSeasonality, referenceMonth);
         return ResponseEntity.ok(response);
     }
 

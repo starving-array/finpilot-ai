@@ -26,6 +26,9 @@ export interface ScoreResponse {
   business_type: string | null
   state: string | null
   requested_loan_amount: number | null
+  traditional_signal_contribution?: number
+  alternative_signal_contribution?: number
+  seasonality_adjustment?: SeasonalityAdjustment | null
 }
 
 export interface CustomerProfileResponse {
@@ -57,6 +60,8 @@ export interface DecisionResponse {
 
 export interface Flags {
   is_blank_slate: boolean
+  financial_capacity_corroboration?: string | null
+  financial_capacity_source?: string | null
   epfo_plausibility: EpfoPlausibilityFlag
   capacity_flag: CapacityFlag
   seasonality_flags: SeasonalityFlags
@@ -67,6 +72,7 @@ export interface EpfoPlausibilityFlag {
   message: string
   implied_wage: number | null
   employee_count: number | null
+  contribution_type: string | null
 }
 
 export interface CapacityFlag {
@@ -77,8 +83,7 @@ export interface CapacityFlag {
 }
 
 export interface SeasonalityFlags {
-  fuel: SeasonalityFlag
-  electricity: SeasonalityFlag
+  fuel?: SeasonalityFlag | null
 }
 
 export interface SeasonalityFlag {
@@ -88,11 +93,31 @@ export interface SeasonalityFlag {
   expected_range: Record<string, number> | null
 }
 
+export interface SeasonalityTriggeredMetric {
+  metric: string
+  observed_cv: number
+  expected_ceiling: number
+  base_penalty: number
+  penalty_applied: number
+  peak_month_discount: boolean
+  reason: string
+}
+
+export interface SeasonalityAdjustment {
+  enabled: boolean
+  total_penalty_before_cap: number
+  cap_applied: boolean
+  seasonality_adjusted_score: number | null
+  triggered_metrics: SeasonalityTriggeredMetric[]
+}
+
 export interface ShapExplanation {
   shap_values: Record<string, number>
   base_value: number
   feature_ranking: FeatureRank[]
   human_readable_summary: string
+  traditional_signal_contribution?: number
+  alternative_signal_contribution?: number
 }
 
 export interface FeatureRank {
@@ -104,13 +129,6 @@ export interface FeatureRank {
   business_description: string
   source: string
 }
-
-export const CURATED_IDS = [
-  { id: 'CUST00042', label: 'Ramesh Traders (blank, yes-to-go)' },
-  { id: 'CUST00011', label: 'Shakti Mfg (full, disciplined)' },
-  { id: 'CUST00087', label: 'Kaveri Logistics (blank, non-disciplined)' },
-  { id: 'CUST00134', label: 'Anand Cold Chain (full, no-to-go)' },
-]
 
 export const BUCKET_COLORS: Record<string, { color: string; bg: string; border: string; label: string }> = {
   'yes-to-go':       { color: '#1B5FA8', bg: '#E6EEFA', border: '#A8C3ED', label: 'Yes-to-go' },

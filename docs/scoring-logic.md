@@ -233,28 +233,48 @@ def compute_data_coverage(electricity_*, epfo_*, water_*, fuel_*):
 
 ```python
 MIN_SIGNALS_FOR_CONFIDENCE = 2
-EVIDENCE_CONFIDENCE_FALLBACK = 0.5
+EVIDENCE_CONFIDENCE_FALLBACK = {
+    0: 0.3,          # No signals → low confidence
+    "direct": 0.6,   # 1 direct (GST/EPFO) signal → moderate
+    "proxy": 0.5,    # 1 proxy (elec/water) signal → moderate-low
+}
 
 def compute_evidence_confidence(gst_filing_regularity=None,
                                  epfo_contribution_regularity=None,
                                  electricity_payment_delay_days_avg=None,
-                                 water_payment_delay_days_avg=None):
+                                 water_payment_delay_days_avg=None,
+                                 is_blank_slate=False):
     signals = []
-    if gst_filing_regularity >= 0: signals.append(gst_filing_regularity)
-    if epfo_contribution_regularity >= 0: signals.append(epfo_contribution_regularity)
-    if electricity_payment_delay_days_avg >= 0:
+    if gst_filing_regularity is not None and gst_filing_regularity >= 0:
+        signals.append(gst_filing_regularity)
+    if epfo_contribution_regularity is not None and epfo_contribution_regularity >= 0:
+        signals.append(epfo_contribution_regularity)
+    if electricity_payment_delay_days_avg is not None and electricity_payment_delay_days_avg >= 0:
         norm = electricity_payment_delay_days_avg / 30.0
         signals.append(max(0.01, 1.0 / (1.0 + 2.0 * norm)))
-    if water_payment_delay_days_avg >= 0:
+    if water_payment_delay_days_avg is not None and water_payment_delay_days_avg >= 0:
         norm = water_payment_delay_days_avg / 30.0
         signals.append(max(0.01, 1.0 / (1.0 + 2.0 * norm)))
 
-    if len(signals) < 2:
-        return 0.5  # Neutral
+    n = len(signals)
+    if n == 0:
+        return 0.3
+    if n == 1:
+        has_direct = any(
+            s is not None and s > 0
+            for s in [gst_filing_regularity, epfo_contribution_regularity]
+            if s is not None
+        )
+        if signals and (
+            (gst_filing_regularity is not None and gst_filing_regularity >= 0) or
+            (epfo_contribution_regularity is not None and epfo_contribution_regularity >= 0)
+        ):
+            return 0.6
+        return 0.5
 
     arr = np.array(signals)
-    cv = arr.std() / arr.mean() if arr.mean() > 0 else 1.0
-    return min(1.0 - cv, 1.0)
+    cv = float(arr.std() / arr.mean()) if arr.mean() > 0 else 1.0
+    return max(min(1.0 - cv, 1.0), 0.0)
 ```
 
 ### Feature 6: is_blank_slate_flag (Binary flag for GBM)
@@ -352,14 +372,13 @@ COMPOSITE_WEIGHTS = {
     "evidence_confidence": 0.05,
 }
 
-composite_score = (
+composite_score = max((
     0.40 * payment_regularity
     + 0.25 * financial_capacity_proxy
     + 0.20 * business_longevity
     + 0.10 * data_coverage
     + 0.05 * evidence_confidence
-)
-```
+), 0.0)  # Clamped ≥ 0.0 to prevent negative scores from edge-case CV values
 
 This is computed server-side in the ML service and returned alongside the GBM bucket. The composite score is the numeric anchor visible to the underwriter; the GBM provides the learned classification.
 
@@ -381,21 +400,21 @@ CATEGORY_ORDER = ["no-to-go", "non-disciplined", "yes-to-go", "disciplined"]
 
 ```python
 BUCKET_THRESHOLDS = [
-    ("disciplined", 0.84),
-    ("yes-to-go", 0.78),
-    ("non-disciplined", 0.70),
+    ("disciplined", 0.80),
+    ("yes-to-go", 0.65),
+    ("non-disciplined", 0.45),
     ("no-to-go", 0.00),
 ]
 ```
 
 | Bucket | Label Threshold | Risk Map |
 |--------|-----------------|----------|
-| `disciplined` | >= 0.84 | 0.70 |
-| `yes-to-go` | >= 0.78 | 0.90 |
-| `non-disciplined` | >= 0.70 | 0.40 |
-| `no-to-go` | < 0.70 | 0.10 |
+| `disciplined` | >= 0.80 | 0.90 |
+| `yes-to-go` | >= 0.65 | 0.70 |
+| `non-disciplined` | >= 0.45 | 0.40 |
+| `no-to-go` | < 0.45 | 0.10 |
 
-**Note**: The `yes-to-go` risk mapping (0.90) assigns the highest safety score to this bucket -- it represents the most creditworthy approvals, while `disciplined` (0.70) may include businesses with lower data coverage. This is the risk map used for label validation metrics, not for display.
+**Note**: The `disciplined` bucket has the highest risk map value (0.90) — it represents the most consistent payment behavior. The risk map is used for label validation metrics and model training, not for display.
 
 ---
 
@@ -519,11 +538,10 @@ Saved to `ml-service/models/model_<version>.joblib` and symlinked as `model_late
 
 ### Implementation
 
-Uses `shap.KernelExplainer` with 20 random background samples (model-agnostic):
+Uses `shap.TreeExplainer` — exact, deterministic SHAP values for tree-based models (no background samples needed):
 
 ```python
-background = np.random.default_rng(42).random((20, 6)) * 0.5 + 0.5
-explainer = shap.KernelExplainer(model.predict_proba, background)
+explainer = shap.TreeExplainer(model)
 ```
 
 ### Per-Prediction Flow

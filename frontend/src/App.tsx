@@ -12,16 +12,14 @@ const INITIAL: AppState = { status: 'idle', customerId: '', result: null, profil
 export default function App() {
   const [state, setState] = useState<AppState>(INITIAL)
   const [searchId, setSearchId] = useState('')
-  const [businessType, setBusinessType] = useState('')
+  const [enableSeasonality, setEnableSeasonality] = useState(false)
   const [activeTab, setActiveTab] = useState('Score lookup')
 
   const handleSearch = useCallback(async (customerId: string) => {
     if (!customerId.trim()) return
     setState({ status: 'loading', customerId, result: null, profile: null, error: null })
     try {
-      const [score] = await Promise.all([
-        fetchScore(customerId),
-      ])
+      const score = await fetchScore(customerId, enableSeasonality)
       const status: Status = score.source === 'cache-fallback' ? 'stale' : 'success'
       setState({ status, customerId, result: score, profile: null, error: null })
     } catch (e) {
@@ -33,12 +31,11 @@ export default function App() {
         setState({ status: 'error', customerId, result: null, profile: null, error: e instanceof Error ? e.message : 'An unexpected error occurred' })
       }
     }
-  }, [])
+  }, [enableSeasonality])
 
   const handleClear = useCallback(() => {
     setState(INITIAL)
     setSearchId('')
-    setBusinessType('')
   }, [])
 
   const handleTabChange = useCallback((tab: string) => {
@@ -53,11 +50,11 @@ export default function App() {
       <SearchBar
         customerId={searchId}
         onCustomerIdChange={setSearchId}
-        businessType={businessType}
-        onBusinessTypeChange={setBusinessType}
         onFetch={() => handleSearch(searchId)}
         onClear={handleClear}
         disabled={status === 'loading'}
+        enableSeasonality={enableSeasonality}
+        onEnableSeasonalityChange={setEnableSeasonality}
       />
 
       {status === 'stale' && result?.stale_since && (

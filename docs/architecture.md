@@ -35,13 +35,15 @@ A 3-tier microservices system that scores Indian MSMEs for creditworthiness usin
 - Submit underwriter decisions via `POST /api/v1/decisions`
 - View customer profile with data completeness score
 - Health monitoring via `/api/v1/score/health`
+- EPFO contribution rate auto-detection (12% vs 24%)
+- Seasonality CVs computed from all available time-series (fuel, electricity, GST, water, EPFO)
 
 ### Output
 
 - **GBM classification**: 4 buckets (disciplined / yes-to-go / non-disciplined / no-to-go)
-- **Composite score**: Deterministic 0-1 weighted formula (model-independent)
-- **SHAP explanations**: Per-feature attribution for every prediction (6 features)
-- **Diagnostic flags**: EPFO plausibility, loan-to-capacity, seasonality
+- **Composite score**: Deterministic 0-1 weighted formula (model-independent, clamped ≥ 0)
+- **SHAP explanations**: Per-feature attribution via TreeExplainer (exact, deterministic)
+- **Diagnostic flags**: EPFO plausibility (with auto-detected contribution rate), loan-to-capacity, seasonality (all signals)
 
 ---
 
@@ -64,39 +66,39 @@ A 3-tier microservices system that scores Indian MSMEs for creditworthiness usin
                |  AuditController             |
                |                              |
                |  Resilience4j                |
-               |  Circuit Breaker             |
-               |  + Retry + Time Limiter      |
-               +--------------+---------------+
-                              |
-            +-----------------+-----------------+
-            |                 |                 |
-            v                 v                 v
-     +-----------+     +-----------+     +-----------+
-     |  Redis 7  |     |PostgreSQL |     | FastAPI   |
-     |  (cache)  |     | 16        |     | :8000     |
-     |           |     | profiles  |     |(internal) |
-     | score:{id}|     | audit_log |     +-----------+
-     | TTL 30min |     | decisions |     | POST /predict
-     +-----------+     +-----------+     | GET /health
-                                         | GET /models/{v}/metadata
-                                         +-----------+
-                                                      |
-                                                      v
-                                         +-----------------------+
-                                         | ModelManager singleton|
-                                         | (loaded at startup)   |
-                                         |                       |
-                                         | GBM GradientBoosting  |
-                                         | SHAP KernelExplainer  |
-                                         | (20 background smpls) |
-                                         +-----------------------+
+                |  Circuit Breaker             |
+                |  + Retry + Time Limiter (6s)|
+                +--------------+---------------+
+                               |
+             +-----------------+-----------------+
+             |                 |                 |
+             v                 v                 v
+      +-----------+     +-----------+     +-----------+
+      |  Redis 7  |     |PostgreSQL |     | FastAPI   |
+      |  (cache)  |     | 16        |     | :8000     |
+      |           |     | profiles  |     |(internal) |
+      | score:{id}|     | audit_log |     +-----------+
+      | TTL 30min |     | decisions |     | POST /predict
+      +-----------+     +-----------+     | GET /health
+                                          | GET /models/{v}/metadata
+                                          +-----------+
+                                                       |
+                                                       v
+                                          +-----------------------+
+                                          | ModelManager singleton|
+                                          | (loaded at startup)   |
+                                          |                       |
+                                          | GBM GradientBoosting  |
+                                          | SHAP TreeExplainer    |
+                                          | (exact, deterministic)|
+                                          +-----------------------+
 ```
 
 ### Layers
 
 | Layer | Tech | Port | Role |
 |-------|------|------|------|
-| **Presentation** | React 18 + TypeScript + Vite 5 | 5173 (dev) / 3000 (prod) | Underwriter SPA with 6-state machine |
+| **Presentation** | React 18 + TypeScript + Vite 5 | 5173 (dev) / 3000 (prod) | Underwriter SPA with 7-state machine |
 | **Gateway** | Spring Boot 3.3 (Java 21) | 8080 | REST API, orchestration, resilience, caching |
 | **ML Service** | FastAPI (Python 3.11) | 8000 (internal) | Feature engineering, model inference, SHAP |
 | **Cache** | Redis 7 | internal | Score response cache (30-min TTL) |
@@ -129,7 +131,7 @@ backend/
 
 ### 3.2 State Machine (`App.tsx`)
 
-A 6-state machine (not 7 - `idle`, `loading`, `success`, `stale`, `notFound`, `serviceDegraded`, `error`):
+A 7-state machine (`idle`, `loading`, `success`, `stale`, `notFound`, `serviceDegraded`, `error`):
 
 ```
 idle -> loading -> success (source=live|cache-hit)
@@ -193,7 +195,7 @@ ShapExplanation {
 }
 ```
 
-Curated demo IDs: `CUST00042`, `CUST00011`, `CUST00087`, `CUST00134`
+Curated demo IDs: `CUST00042`, `CUST00011`, `CUST00087`, `CUST00134` (defined in `src/config/demo-ids.ts`)
 
 ---
 
@@ -323,8 +325,7 @@ class ModelManager:
         self._load_explainer()
 
     def _load_explainer(self):
-        background = np.random.default_rng(42).random((20, 6)) * 0.5 + 0.5
-        self._explainer = shap.KernelExplainer(self._model.predict_proba, background)
+        self._explainer = shap.TreeExplainer(self._model)
 ```
 
 ### 5.3 Inference Flow (`router.py`)
@@ -350,7 +351,7 @@ POST /predict {customer_id, gst_registered, ..., business_type}
   +-> bucket = CATEGORY_ORDER[pred_idx]
   +-> probability = proba[pred_idx]
   +-> composite_score = weighted formula (5 features, not blank_slate_flag)
-  +-> compute_shap(explainer, model, fv, blank_slate, business_type)
+  +-> compute_shap(explainer, fv, blank_slate, business_type)  # TreeExplainer, no background
   |
   +-> Assemble ScoreResult -> PredictResponse
 ```
@@ -500,7 +501,7 @@ CREATE INDEX idx_cp_business_type ON customer_profile (business_type);
 CREATE INDEX idx_cp_blank_slate ON customer_profile (is_blank_slate);
 ```
 
-#### V9: `audit_log_v2`
+#### V9: `audit_log_v2` (patched by V12 — `request_id` column added)
 ```sql
 CREATE TABLE audit_log_v2 (
     id               BIGSERIAL PRIMARY KEY,
@@ -509,6 +510,7 @@ CREATE TABLE audit_log_v2 (
     confidence       NUMERIC(5,4),
     blank_slate_flag BOOLEAN NOT NULL DEFAULT FALSE,
     model_version    VARCHAR(50) NOT NULL,
+    request_id       VARCHAR(36),
     shap_reasons     JSONB NOT NULL DEFAULT '{}',
     capacity_flag    JSONB DEFAULT '{}',
     epfo_flag        JSONB DEFAULT '{}',
@@ -533,6 +535,13 @@ CREATE TABLE underwriter_decision (
 CREATE INDEX idx_ud_decision ON underwriter_decision (decision);
 CREATE INDEX idx_ud_customer_id ON underwriter_decision (customer_id);
 ```
+
+### Patch Migrations (V11-V12)
+
+| Migration | Table | Change |
+|-----------|-------|--------|
+| V11 | `audit_log_v2` | Add `composite_score` NUMERIC(5,4) column |
+| V12 | `audit_log_v2` | Widen `request_id` to VARCHAR(36) |
 
 ### Legacy Tables (Generation 1: V1-V7)
 
@@ -794,7 +803,7 @@ FinancialHealthException (abstract, extends RuntimeException)
 
 | Layer | Config | Behaviour |
 |-------|--------|-----------|
-| **Time Limiter** | 4s timeout | Cancels long-running requests |
+| **Time Limiter** | 6s timeout (aligned with HTTP client 5s timeout) | Cancels long-running requests |
 | **Retry** | 2 attempts, 500ms wait | Retries transient failures (IOException, SocketTimeoutException) |
 | **Circuit Breaker** | COUNT_BASED, 10-call sliding window, 50% failure rate threshold, 30s open wait | Prevents cascading failures |
 
@@ -803,7 +812,7 @@ FinancialHealthException (abstract, extends RuntimeException)
 ```
 1. Service call succeeds -> return "live", no fallback needed
 
-2. Timeout (>4s, circuit still CLOSED) -> HTTP 504 SCORING_TIMEOUT
+2. Timeout (>6s, circuit still CLOSED) -> HTTP 504 SCORING_TIMEOUT
    No fallback on timeout -- surface performance issue visibly
 
 3. Circuit OPEN or retries exhausted:
@@ -829,7 +838,7 @@ resilience4j:
       automatic-transition-from-open-to-half-open-enabled: true
   timelimiter:
     scoringService:
-      timeout-duration: 4s
+      timeout-duration: 6s
       cancel-running-future: true
   retry:
     scoringService:
@@ -886,7 +895,23 @@ Named volumes: `postgres-data`, `redis-data`, `ml-models`
 | `python cli.py status` | - | Health report |
 | `python cli.py commit` | - | Quality-gated commit |
 
-### 12.3 Synthetic Data Pipeline
+### 12.3 Production Deployment
+
+Pre-built images are published to GitHub Container Registry (GHCR) on tagged releases:
+
+| Image | GHCR Package |
+|-------|-------------|
+| `ghcr.io/{org}/finpilot-backend` | Backend (Spring Boot) |
+| `ghcr.io/{org}/finpilot-ml-service` | ML Service (FastAPI) |
+| `ghcr.io/{org}/finpilot-frontend` | Frontend (nginx SPA) |
+
+```bash
+# Production deploy (pre-built images)
+export GHCR_NAMESPACE=your-org
+docker compose -f docker/docker-compose.prod.yml up -d
+```
+
+### 12.4 Synthetic Data Pipeline
 
 1. `generate_profiles.py` - 350 deterministic profiles (seed=42), 30% blank-slate, 5 business types, all 16 fields + is_blank_slate
 2. `label_profiles.py` - Compute composite score -> assign bucket via thresholds -> validate distribution (target: 10-50% per bucket)

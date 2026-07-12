@@ -7,14 +7,17 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import classification_report, f1_score, cohen_kappa_score, precision_score, recall_score
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.metrics import (
+    classification_report, f1_score, cohen_kappa_score,
+    precision_score, recall_score, r2_score, mean_absolute_error,
+)
 from sklearn.model_selection import train_test_split
 
 from app.feature_engineering import compute_all_features, FEATURE_NAMES
 from app.constants import (
     RANDOM_STATE, OPTUNA_N_TRIALS, ECE_MAX, PRECISION_LOW_RISK_TARGET, RECALL_HIGH_RISK_TARGET,
-    CATEGORY_ORDER as C_CATEGORY_ORDER,
+    CATEGORY_ORDER as C_CATEGORY_ORDER, COMPOSITE_WEIGHTS,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -120,16 +123,18 @@ def low_risk_proba_from_multiclass(proba: np.ndarray) -> np.ndarray:
     return proba[:, 2] + proba[:, 3]
 
 
+LOW_RISK_PROBA_THRESHOLD = 0.70
+HIGH_RISK_PROBA_THRESHOLD = 0.30
+
+
 def compute_business_metrics(y_true: np.ndarray, proba: np.ndarray) -> dict:
     y_binary = np.isin(y_true, list(LOW_RISK_CLASSES)).astype(np.int32)
     lr_proba = low_risk_proba_from_multiclass(proba)
 
-    low_risk_thresh = np.percentile(lr_proba, 80)
-    pred_low_risk = (lr_proba >= low_risk_thresh).astype(np.int32)
+    pred_low_risk = (lr_proba >= LOW_RISK_PROBA_THRESHOLD).astype(np.int32)
     precision_low_risk = float(precision_score(y_binary, pred_low_risk, pos_label=1, zero_division=0))
 
-    high_risk_thresh = np.percentile(lr_proba, 20)
-    pred_high_risk = (lr_proba < high_risk_thresh).astype(np.int32)
+    pred_high_risk = (lr_proba < HIGH_RISK_PROBA_THRESHOLD).astype(np.int32)
     recall_high_risk = float(recall_score(y_binary, pred_high_risk, pos_label=0, zero_division=0))
 
     ece = float(expected_calibration_error(y_true, proba))
@@ -157,7 +162,6 @@ def optimize_optuna(X_train: np.ndarray, y_train: np.ndarray) -> dict:
             "max_depth": 4,
             "min_samples_leaf": 5,
             "subsample": 0.8,
-            "colsample_bytree": 0.8,
         }
 
     def objective(trial):
@@ -167,7 +171,6 @@ def optimize_optuna(X_train: np.ndarray, y_train: np.ndarray) -> dict:
             "max_depth": trial.suggest_int("max_depth", 3, 8),
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 3, 10),
             "subsample": trial.suggest_float("subsample", 0.6, 1.0),
-            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
             "random_state": SEED,
         }
 
@@ -181,8 +184,7 @@ def optimize_optuna(X_train: np.ndarray, y_train: np.ndarray) -> dict:
         proba = model.predict_proba(X_val)
         lr_proba = low_risk_proba_from_multiclass(proba)
         y_binary = np.isin(y_val, list(LOW_RISK_CLASSES)).astype(np.int32)
-        low_risk_thresh = np.percentile(lr_proba, 90)
-        pred_low_risk = (lr_proba >= low_risk_thresh).astype(np.int32)
+        pred_low_risk = (lr_proba >= LOW_RISK_PROBA_THRESHOLD).astype(np.int32)
         return float(precision_score(y_binary, pred_low_risk, pos_label=1, zero_division=0))
 
     study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=SEED))
@@ -251,7 +253,6 @@ def train_model(csv_path: str | Path) -> dict:
         max_depth=best_params.get("max_depth", 4),
         min_samples_leaf=best_params.get("min_samples_leaf", 5),
         subsample=best_params.get("subsample", 0.8),
-        colsample_bytree=best_params.get("colsample_bytree", 0.8),
         random_state=SEED,
         verbose=0,
     )
@@ -296,10 +297,47 @@ def train_model(csv_path: str | Path) -> dict:
     )
     logger.info("  ✅ Test (OOD) gates PASSED")
 
+    y_composite = np.array(_compute_composite_scores(rows, X_list), dtype=np.float64)
+    yc_train = y_composite[train_mask]
+    yc_val = y_composite[val_mask]
+    yc_test = y_composite[test_mask]
+
+    regressor = GradientBoostingRegressor(
+        n_estimators=best_params.get("n_estimators", 200),
+        learning_rate=best_params.get("learning_rate", 0.05),
+        max_depth=best_params.get("max_depth", 4),
+        min_samples_leaf=best_params.get("min_samples_leaf", 5),
+        subsample=best_params.get("subsample", 0.8),
+        random_state=SEED,
+    )
+    regressor.fit(X_train, yc_train)
+
+    yc_val_pred = regressor.predict(X_val)
+    yc_test_pred = regressor.predict(X_test)
+    r2_val = r2_score(yc_val, yc_val_pred)
+    r2_test = r2_score(yc_test, yc_test_pred)
+    mae_val = mean_absolute_error(yc_val, yc_val_pred)
+    mae_test = mean_absolute_error(yc_test, yc_test_pred)
+
+    logger.info(f"\n=== Composite Score Regressor ===")
+    logger.info(f"  Validation R²:  {r2_val:.4f}")
+    logger.info(f"  Validation MAE: {mae_val:.4f}")
+    logger.info(f"  Test OOD R²:    {r2_test:.4f}")
+    logger.info(f"  Test OOD MAE:   {mae_test:.4f}")
+
     model_version = f"2.0.{_count_existing_versions()}"
     artifact = {
         "model": model,
+        "regressor": regressor,
         "version": model_version,
+        "model_type": "composite_score_approximator",
+        "model_note": (
+            "This model is trained on synthetic data where labels are deterministically "
+            "derived from the composite score formula. The classifier predicts bucket labels; "
+            "the regressor predicts the composite score directly. Neither is a true probability "
+            "of default — both approximate a known deterministic function. Replace with "
+            "real loan-outcome data for production use."
+        ),
         "metadata": {
             "training_date": datetime.now(timezone.utc).isoformat(),
             "dataset_hash": compute_dataset_hash(rows),
@@ -312,6 +350,10 @@ def train_model(csv_path: str | Path) -> dict:
                 "test_recall_high_risk": float(test_biz["recall_high_risk"]),
                 "test_ece": float(test_biz["ece"]),
                 "validation_gates_passed": bool(val_biz["validation_gates_passed"] and test_biz["validation_gates_passed"]),
+                "regressor_val_r2": float(r2_val),
+                "regressor_val_mae": float(mae_val),
+                "regressor_test_r2": float(r2_test),
+                "regressor_test_mae": float(mae_test),
             },
             "feature_schema": FEATURE_NAMES,
             "n_samples": len(rows),
@@ -353,6 +395,20 @@ def train_model(csv_path: str | Path) -> dict:
     logger.info(f"Training report saved to {report_path}")
 
     return summary
+
+
+def _compute_composite_scores(rows, feature_vectors):
+    scores = []
+    for row, fv in zip(rows, feature_vectors):
+        score = (
+            COMPOSITE_WEIGHTS["payment_regularity"] * fv[0]
+            + COMPOSITE_WEIGHTS["financial_capacity_proxy"] * fv[1]
+            + COMPOSITE_WEIGHTS["business_longevity"] * fv[2]
+            + COMPOSITE_WEIGHTS["data_coverage"] * fv[3]
+            + COMPOSITE_WEIGHTS["evidence_confidence"] * fv[4]
+        )
+        scores.append(max(0.0, score))
+    return scores
 
 
 def _count_existing_versions() -> int:

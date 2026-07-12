@@ -53,4 +53,16 @@ Thumbs.db
 synthetic-data/output/
 ml-service/models/*.joblib
 
+# Session / scratch files
+projectreport*.md
+promt*
+pending.md
+final_doubts.md
+remaining_doubts.md
+*_verification_prompts.md
+claude.json
+gemini.json
+gpt.json
+
 ignorefile
+ref

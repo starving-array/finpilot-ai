@@ -103,6 +103,7 @@ export default function ScoreDetail({ result, customerId }: ScoreDetailProps) {
     <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 20, marginBottom: 20, alignItems: 'start' }}>
       <div style={{ background: '#fff', border: '1px solid #E2E6EC', borderRadius: 10, padding: 20 }}>
         <p style={{ fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#5B6675', margin: '0 0 16px' }}>Reasons (SHAP-derived)</p>
+        <p style={{ fontSize: 11, color: '#8A6D1B', margin: '-8px 0 12px', lineHeight: 1.4 }}>SHAP explains the ML model's confidence direction, not the composite score breakdown. The composite score uses fixed weights (40% payment, 25% capacity, 20% longevity, 10% coverage, 5% confidence).</p>
         {reasons.length === 0 && <p style={{ fontSize: 13, color: '#5B6675' }}>No SHAP explanation available.</p>}
         {reasons.map((r, i) => (
           <div key={r.feature_name} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto', gap: 10, alignItems: 'center', padding: i === 0 ? '0 0 11px' : '11px 0', borderTop: i > 0 ? '1px solid #E2E6EC' : 'none' }}>
@@ -124,9 +125,9 @@ export default function ScoreDetail({ result, customerId }: ScoreDetailProps) {
               }}>
                 {r.source}
               </span>
-              <div style={{ width: 64, height: 4, background: '#E2E6EC', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ height: '100%', background: '#C8A951', width: `${Math.min(100, Math.abs(r.shap_value) * 30)}%` }} />
-              </div>
+                <div style={{ width: 64, height: 4, background: '#E2E6EC', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', background: '#C8A951', width: `${Math.min(100, Math.abs(r.shap_value) * 100)}%` }} />
+                </div>
             </div>
           </div>
         ))}

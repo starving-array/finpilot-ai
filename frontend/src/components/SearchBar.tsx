@@ -1,16 +1,16 @@
-import { CURATED_IDS } from '../types'
+import { CURATED_IDS } from '../config/demo-ids'
 
 interface SearchBarProps {
   customerId: string
   onCustomerIdChange: (id: string) => void
-  businessType: string
-  onBusinessTypeChange: (t: string) => void
   onFetch: () => void
   onClear: () => void
   disabled: boolean
+  enableSeasonality: boolean
+  onEnableSeasonalityChange: (v: boolean) => void
 }
 
-export default function SearchBar({ customerId, onCustomerIdChange, businessType, onBusinessTypeChange, onFetch, onClear, disabled }: SearchBarProps) {
+export default function SearchBar({ customerId, onCustomerIdChange, onFetch, onClear, disabled, enableSeasonality, onEnableSeasonalityChange }: SearchBarProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -19,7 +19,7 @@ export default function SearchBar({ customerId, onCustomerIdChange, businessType
   }
 
   return (
-    <div style={{ background: '#fff', border: '1px solid #E2E6EC', borderRadius: 10, padding: 16, display: 'grid', gridTemplateColumns: '1fr 180px auto auto', gap: 12, alignItems: 'end', marginBottom: 20 }}>
+    <div style={{ background: '#fff', border: '1px solid #E2E6EC', borderRadius: 10, padding: 16, display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 12, alignItems: 'end', marginBottom: 20 }}>
       <div>
         <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', color: '#5B6675', marginBottom: 6 }}>Customer ID</label>
         <input
@@ -33,21 +33,17 @@ export default function SearchBar({ customerId, onCustomerIdChange, businessType
           style={{ width: '100%', padding: '10px 12px', border: '1px solid #E2E6EC', borderRadius: 7, fontFamily: 'inherit', fontSize: 14, color: '#1A2430', background: '#fff', outline: 'none', boxSizing: 'border-box' }}
         />
       </div>
-      <div>
-        <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', color: '#5B6675', marginBottom: 6 }}>Business type</label>
-        <select
-          value={businessType}
-          onChange={e => onBusinessTypeChange(e.target.value)}
-          disabled={disabled}
-          style={{ width: '100%', padding: '10px 12px', border: '1px solid #E2E6EC', borderRadius: 7, fontFamily: 'inherit', fontSize: 14, color: '#1A2430', background: '#fff', outline: 'none', boxSizing: 'border-box' }}
-        >
-          <option value="">All types</option>
-          <option value="Manufacturing">Manufacturing</option>
-          <option value="Logistics">Logistics</option>
-          <option value="Trading">Trading</option>
-          <option value="Services">Services</option>
-          <option value="Agriculture">Agriculture</option>
-        </select>
+      <div style={{ display: 'flex', alignItems: 'end', gap: 6 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: '#5B6675', cursor: 'pointer', padding: '10px 0', whiteSpace: 'nowrap' }}>
+          <input
+            type="checkbox"
+            checked={enableSeasonality}
+            onChange={e => onEnableSeasonalityChange(e.target.checked)}
+            disabled={disabled}
+            style={{ accentColor: '#003D7C' }}
+          />
+          Seasonality
+        </label>
       </div>
       <button onClick={onFetch} disabled={disabled || !customerId.trim()} style={{ padding: '10px 20px', borderRadius: 7, border: 'none', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', height: 41, background: disabled || !customerId.trim() ? '#C7CDD6' : '#003D7C', color: '#fff' }}>
         Fetch score

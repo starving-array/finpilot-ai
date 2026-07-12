@@ -1,13 +1,17 @@
 {
-  "model_version": "2.0.8",
-  "path": "E:\\project\\DistributedMind-IDBI\\ml-service\\models\\model_2.0.8.joblib",
+  "model_version": "2.0.0",
+  "path": "C:\\Users\\lovea\\Documents\\hackathon\\finpilot-ai\\ml-service\\models\\model_2.0.0.joblib",
   "metrics": {
     "train_macro_f1": 1.0,
-    "test_macro_f1": 0.8394444444444444,
-    "test_weighted_f1": 0.8375555555555555,
-    "quadratic_weighted_kappa": 0.9326805385556916
+    "val_precision_low_risk": 0.7142857142857143,
+    "val_recall_high_risk": 0.75,
+    "val_ece": 0.25670420684859185,
+    "test_precision_low_risk": 0.6818181818181818,
+    "test_recall_high_risk": 0.7555555555555555,
+    "test_ece": 0.1890464270989632,
+    "validation_gates_passed": true
   },
-  "n_train": 280,
-  "n_test": 70,
+  "n_train": 105,
+  "n_test": 109,
   "feature_count": 6
 }

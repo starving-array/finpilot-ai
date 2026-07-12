@@ -7,6 +7,12 @@ def compute_capacity_flag(
     electricity_monthly_units_avg,
     business_type,
 ):
+    """
+    NOTE: ELEC_PROXY_REVENUE_BASE (₹5,00,000) in constants.py is an arbitrary estimate.
+    The formula proxy_revenue = (units / percentile) * base is not empirically calibrated.
+    When source='electricity_proxy', the ratio should be treated as a rough heuristic,
+    not a precise capacity measurement. Prefer GST-based revenue when available.
+    """
     if not requested_loan_amount or requested_loan_amount <= 0:
         return {"flag": "unavailable", "message": "No loan amount provided"}
 

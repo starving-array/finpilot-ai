@@ -42,8 +42,7 @@ spring:
 app:
   ml-service:
     url: ${ML_SERVICE_URL:http://localhost:8000}
-    timeout-seconds: ${ML_SERVICE_TIMEOUT_SECONDS:5}
-    http-timeout-seconds: ${ML_SERVICE_HTTP_TIMEOUT_SECONDS:10}
+    http-timeout-seconds: ${ML_SERVICE_HTTP_TIMEOUT_SECONDS:5}
   redis:
     key-prefix: ${REDIS_KEY_PREFIX:score:}
     cache-ttl-minutes: ${CACHE_TTL_MINUTES:30}
@@ -66,7 +65,7 @@ resilience4j:
   timelimiter:
     instances:
       scoringService:
-        timeout-duration: ${TL_TIMEOUT_DURATION:4s}
+        timeout-duration: ${TL_TIMEOUT_DURATION:6s}
         cancel-running-future: true
   retry:
     instances:

@@ -2,8 +2,13 @@ import type { ScoreResponse, CustomerProfileResponse, DecisionRequest, DecisionR
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
-export async function fetchScore(customerId: string): Promise<ScoreResponse> {
-  const res = await fetch(`${BASE_URL}/score/${customerId}`, {
+export async function fetchScore(customerId: string, enableSeasonality?: boolean, referenceMonth?: number): Promise<ScoreResponse> {
+  const params = new URLSearchParams()
+  if (enableSeasonality) params.set('enableSeasonality', 'true')
+  if (referenceMonth != null) params.set('referenceMonth', String(referenceMonth))
+  const qs = params.toString()
+  const url = qs ? `${BASE_URL}/score/${customerId}?${qs}` : `${BASE_URL}/score/${customerId}`
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   })

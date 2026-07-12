@@ -1,0 +1,1 @@
+ALTER TABLE audit_log_v2 ALTER COLUMN request_id TYPE VARCHAR(36);

@@ -239,8 +239,7 @@ def main():
     model_version = artifact.get("version", "?") if isinstance(artifact, dict) else "?"
     print(f"Model v{model_version} loaded\n")
 
-    background = np.random.default_rng(42).random((20, 6)) * 0.5 + 0.5
-    explainer = shap.KernelExplainer(model.predict_proba, background)
+    explainer = shap.TreeExplainer(model)
 
     test_profiles = pick_test_profiles(profiles, model)
     print(f"Found {len(test_profiles)} test profiles\n")
