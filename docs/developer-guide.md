@@ -62,6 +62,44 @@ export GHCR_NAMESPACE=your-org
 docker compose -f docker/docker-compose.prod.yml up -d
 ```
 
+### Railway Deployment
+
+Each service on Railway has its own environment variables. Set these per-service in the Railway dashboard.
+
+**Backend** (Railway → backend → Variables):
+
+| Variable | Value | Notes |
+|----------|-------|-------|
+| `SPRING_PROFILES_ACTIVE` | `docker` | |
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://${{finpilot-db.HOST}}:${{finpilot-db.PORT}}/fhss` | PostgreSQL plugin |
+| `SPRING_DATASOURCE_USERNAME` | `${{finpilot-db.USERNAME}}` | |
+| `DB_PASSWORD` | `${{finpilot-db.PASSWORD}}` | |
+| `APP_JWT_SECRET` | (generate a secure 32+ char secret) | |
+| `ML_SERVICE_URL` | `http://${{ml-service.RAILWAY_PRIVATE_DOMAIN}}` | |
+| `CORS_ALLOWED_ORIGINS` | `https://${{frontend.RAILWAY_PUBLIC_DOMAIN}}` | |
+| `REDIS_ENABLED` | `false` | Set to `true` after adding Redis plugin |
+
+**ML Service** (Railway → ml-service → Variables):
+
+| Variable | Value | Notes |
+|----------|-------|-------|
+| `MODEL_PATH` | `/app/models/model_latest.joblib` | |
+| `REDIS_ENABLED` | `false` | Set to `true` after adding Redis plugin |
+
+**Frontend** (Railway → frontend → Variables):
+
+| Variable | Value | Notes |
+|----------|-------|-------|
+| `VITE_API_BASE_URL` | `/api/v1` | |
+| `BACKEND_HOST` | `${{backend.RAILWAY_PRIVATE_DOMAIN}}` | |
+| `BACKEND_PORT` | `8080` | |
+
+> **Adding Redis later**: Once a Redis plugin (`finpilot-redis`) is provisioned, remove `REDIS_ENABLED=false` from backend and ml-service, then add:
+> - Backend: `REDIS_HOST=${{finpilot-redis.HOST}}`, `REDIS_PORT=${{finpilot-redis.PORT}}`
+> - ML Service: `REDIS_HOST=${{finpilot-redis.HOST}}`, `REDIS_PORT=${{finpilot-redis.PORT}}`
+> 
+> The old `SPRING_DATA_REDIS_*` vars are no longer read.
+
 The CLI handles the full 7-step startup:
 1. Environment check (Python, Docker, Node)
 2. Start infrastructure (PostgreSQL + Redis via Docker)
@@ -251,6 +289,11 @@ All configuration is driven by environment variables in `.env`.
 | `SPRING_DATASOURCE_USERNAME` | `fhss` | |
 | `SPRING_DATASOURCE_PASSWORD` | `change_me_in_production` | |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:3000` | |
+| `REDIS_ENABLED` | `true` | Set `false` to skip Redis entirely |
+| `REDIS_HOST` | `localhost` | Only read when `REDIS_ENABLED=true` |
+| `REDIS_PORT` | `6379` | Only read when `REDIS_ENABLED=true` |
+
+> **Note**: `SPRING_DATA_REDIS_HOST` / `SPRING_DATA_REDIS_PORT` are no longer used. Use `REDIS_HOST` / `REDIS_PORT` instead.
 
 ### ML Service
 
@@ -259,6 +302,9 @@ All configuration is driven by environment variables in `.env`.
 | `MODEL_PATH` | `/app/models/model_latest.joblib` | Use `models\model_latest.joblib` on Windows |
 | `UVICORN_WORKERS` | `2` | |
 | `ML_SERVICE_PORT` | `8000` | |
+| `REDIS_ENABLED` | `true` | Set `false` to skip Redis entirely |
+| `REDIS_HOST` | `localhost` | Only read when `REDIS_ENABLED=true` |
+| `REDIS_PORT` | `6379` | Only read when `REDIS_ENABLED=true` |
 
 ### Docker Compose
 
