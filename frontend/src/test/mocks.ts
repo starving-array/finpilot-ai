@@ -15,11 +15,10 @@ export const MOCK_SCORE_RESPONSE: ScoreResponse = {
   },
   flags: {
     is_blank_slate: false,
-    epfo_plausibility: { flag: 'plausible', message: 'EPFO data is plausible', implied_wage: 15000, employee_count: 10 },
+    epfo_plausibility: { flag: 'plausible', message: 'EPFO data is plausible', implied_wage: 15000, employee_count: 10, contribution_type: 'regular' },
     capacity_flag: { flag: 'normal', message: 'Loan amount is within capacity', loan_to_revenue_ratio: 0.4, source: 'gst' },
     seasonality_flags: {
       fuel: { flag: 'normal', message: 'Fuel volatility within range', value: 0.2, expected_range: { lo: 0, hi: 0.3 } },
-      electricity: { flag: 'normal', message: 'Electricity volatility within range', value: 0.1, expected_range: { lo: 0, hi: 0.3 } },
     },
   },
   shap_explanation: {

@@ -11,6 +11,8 @@ describe('SearchBar', () => {
     onFetch: vi.fn(),
     onClear: vi.fn(),
     disabled: false,
+    enableSeasonality: false,
+    onEnableSeasonalityChange: vi.fn(),
   }
 
   it('renders input field and buttons', () => {
