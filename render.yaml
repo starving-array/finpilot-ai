@@ -11,7 +11,6 @@ services:
     repo: https://github.com/starving-array/finpilot-ai
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
-    plan: free
     region: oregon
     branch: main
     healthCheckPath: /actuator/health
@@ -53,7 +52,6 @@ services:
     repo: https://github.com/starving-array/finpilot-ai
     dockerfilePath: ./ml-service/Dockerfile
     dockerContext: ./ml-service
-    plan: free
     region: oregon
     branch: main
     healthCheckPath: /health
@@ -69,7 +67,6 @@ services:
     name: finpilot-frontend
     runtime: static
     repo: https://github.com/starving-array/finpilot-ai
-    plan: free
     branch: main
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
