@@ -482,7 +482,7 @@ public class ScoringClientService {
             var composite = a.getCompositeScore() != null ? a.getCompositeScore().doubleValue() : 0.0;
             var features = a.getFeatures() != null
                     ? objectMapper.readValue(a.getFeatures(), new TypeReference<Map<String, Double>>() {})
-                    : Map.of();
+                    : Map.<String, Double>of();
             var loanAmount = a.getRequestedLoanAmount() != null
                     ? a.getRequestedLoanAmount().doubleValue() : null;
 
