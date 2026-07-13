@@ -70,7 +70,6 @@ services:
     runtime: static
     repo: https://github.com/starving-array/finpilot-ai
     plan: free
-    region: oregon
     branch: main
     buildCommand: cd frontend && npm ci && npm run build
     staticPublishPath: frontend/dist
