@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: fhss-gateway
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fhss}
     username: ${SPRING_DATASOURCE_USERNAME:fhss}
@@ -25,21 +28,17 @@ spring:
           batch_size: ${JPA_JDBC_BATCH_SIZE:20}
   data:
     redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
-      port: ${SPRING_DATA_REDIS_PORT:6379}
       timeout: ${REDIS_TIMEOUT:2000ms}
-      lettuce:
-        pool:
-          max-active: ${REDIS_POOL_MAX_ACTIVE:8}
-          max-idle: ${REDIS_POOL_MAX_IDLE:4}
-          min-idle: ${REDIS_POOL_MIN_IDLE:2}
-          max-wait: ${REDIS_POOL_MAX_WAIT:2000ms}
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
     baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:true}
 
 app:
+  redis:
+    enabled: ${REDIS_ENABLED:true}
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
   ml-service:
     url: ${ML_SERVICE_URL:http://localhost:8000}
     http-timeout-seconds: ${ML_SERVICE_HTTP_TIMEOUT_SECONDS:5}

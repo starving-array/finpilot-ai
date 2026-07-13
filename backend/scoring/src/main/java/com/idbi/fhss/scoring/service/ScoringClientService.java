@@ -16,6 +16,7 @@ import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -56,12 +57,12 @@ public class ScoringClientService {
             CustomerProfileRepository profileRepo,
             AuditLogV2Repository auditRepo,
             @Value("${app.ml-service.url}") String mlServiceUrl,
-            StringRedisTemplate redisTemplate,
+            ObjectProvider<StringRedisTemplate> redisProvider,
             ObjectMapper objectMapper) {
         this.profileRepo = profileRepo;
         this.auditRepo = auditRepo;
         this.mlServiceUrl = mlServiceUrl;
-        this.redisTemplate = redisTemplate;
+        this.redisTemplate = redisProvider.getIfAvailable();
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder().version(HTTP_1_1).build();
     }
@@ -219,6 +220,7 @@ public class ScoringClientService {
     }
 
     private void cacheResult(ScoreResponse result) {
+        if (redisTemplate == null) return;
         try {
             var key = redisKeyPrefix + result.customerId();
             var value = objectMapper.writeValueAsString(result);
@@ -229,6 +231,7 @@ public class ScoringClientService {
     }
 
     private ScoreResponse getCachedResult(String customerId) {
+        if (redisTemplate == null) return null;
         try {
             var key = redisKeyPrefix + customerId;
             var cached = redisTemplate.opsForValue().get(key);

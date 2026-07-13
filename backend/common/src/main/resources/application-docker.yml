@@ -3,7 +3,8 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/fhss}
     username: ${SPRING_DATASOURCE_USERNAME:fhss}
     password: ${DB_PASSWORD:change_me_in_production}
-  data:
-    redis:
-      host: ${SPRING_DATA_REDIS_HOST:redis}
-      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+app:
+  redis:
+    host: ${REDIS_HOST:redis}
+    port: ${REDIS_PORT:6379}

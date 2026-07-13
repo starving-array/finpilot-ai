@@ -9,6 +9,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,10 +35,10 @@ public class CustomerService {
     private final ObjectMapper objectMapper;
 
     public CustomerService(CustomerRepository customerRepository,
-                           StringRedisTemplate redis,
+                           ObjectProvider<StringRedisTemplate> redisProvider,
                            ObjectMapper objectMapper) {
         this.customerRepository = customerRepository;
-        this.redis = redis;
+        this.redis = redisProvider.getIfAvailable();
         this.objectMapper = objectMapper;
     }
 
@@ -59,22 +60,30 @@ public class CustomerService {
     public CustomerProfileDTO getProfile(UUID customerId) {
         long start = System.currentTimeMillis();
         var cacheKey = CACHE_PREFIX + customerId;
-        var cached = redis.opsForValue().get(cacheKey);
-        if (cached != null) {
+        if (redis != null) {
             try {
-                var dto = objectMapper.readValue(cached, CustomerProfileDTO.class);
-                log.debug("Customer profile cache HIT for {} ({}ms)", customerId, System.currentTimeMillis() - start);
-                return dto;
+                var cached = redis.opsForValue().get(cacheKey);
+                if (cached != null) {
+                    try {
+                        var dto = objectMapper.readValue(cached, CustomerProfileDTO.class);
+                        log.debug("Customer profile cache HIT for {} ({}ms)", customerId, System.currentTimeMillis() - start);
+                        return dto;
+                    } catch (Exception e) {
+                        log.debug("Customer profile cache deserialization failed for {}, falling through to DB", customerId);
+                    }
+                }
             } catch (Exception e) {
-                log.debug("Customer profile cache deserialization failed for {}, falling through to DB", customerId);
+                log.debug("Cache read failed for customer {}, falling through to DB: {}", customerId, e.getMessage());
             }
         }
         var customer = findActive(customerId);
         var dto = toProfileDTO(customer);
-        try {
-            redis.opsForValue().set(cacheKey, objectMapper.writeValueAsString(dto), CACHE_TTL_SECONDS, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.debug("Cache write failed for customer {}: {}", customerId, e.getMessage());
+        if (redis != null) {
+            try {
+                redis.opsForValue().set(cacheKey, objectMapper.writeValueAsString(dto), CACHE_TTL_SECONDS, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.debug("Cache write failed for customer {}: {}", customerId, e.getMessage());
+            }
         }
         log.debug("Customer profile loaded from DB for {} ({}ms)", customerId, System.currentTimeMillis() - start);
         return dto;
@@ -119,8 +128,14 @@ public class CustomerService {
             }
         }
         customerRepository.save(customer);
-        var cacheKey = CACHE_PREFIX + customerId;
-        redis.delete(cacheKey);
+        if (redis != null) {
+            try {
+                var cacheKey = CACHE_PREFIX + customerId;
+                redis.delete(cacheKey);
+            } catch (Exception e) {
+                log.debug("Cache delete failed for customer {}: {}", customerId, e.getMessage());
+            }
+        }
         return toProfileDTO(customer);
     }
 

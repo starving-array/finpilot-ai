@@ -2,7 +2,10 @@ package com.idbi.fhss.common.security;
 
 import java.time.Instant;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.lang.NonNull;
@@ -19,7 +22,10 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Component
+@ConditionalOnBean(StringRedisTemplate.class)
 public class RateLimitFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
     private final StringRedisTemplate redis;
     private final int maxRequestsPerMinute;
@@ -45,24 +51,28 @@ public class RateLimitFilter extends OncePerRequestFilter {
         var endpoint = request.getRequestURI();
         var key = "rate_limit:" + userId + ":" + endpoint;
 
-        var script = """
-            local key = KEYS[1]
-            local limit = tonumber(ARGV[1])
-            local current = redis.call('INCR', key)
-            if current == 1 then
-                redis.call('EXPIRE', key, 60)
-            end
-            return current
-            """;
+        try {
+            var script = """
+                local key = KEYS[1]
+                local limit = tonumber(ARGV[1])
+                local current = redis.call('INCR', key)
+                if current == 1 then
+                    redis.call('EXPIRE', key, 60)
+                end
+                return current
+                """;
 
-        var redisScript = new org.springframework.data.redis.core.script.DefaultRedisScript<Long>(script, Long.class);
-        var current = redis.execute(redisScript, List.of(key), String.valueOf(maxRequestsPerMinute));
+            var redisScript = new org.springframework.data.redis.core.script.DefaultRedisScript<Long>(script, Long.class);
+            var current = redis.execute(redisScript, List.of(key), String.valueOf(maxRequestsPerMinute));
 
-        if (current > maxRequestsPerMinute) {
-            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-            response.setHeader("Retry-After", "60");
-            response.getWriter().write("{\"error\":\"Rate limit exceeded. Retry after 60 seconds.\"}");
-            return;
+            if (current > maxRequestsPerMinute) {
+                response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+                response.setHeader("Retry-After", "60");
+                response.getWriter().write("{\"error\":\"Rate limit exceeded. Retry after 60 seconds.\"}");
+                return;
+            }
+        } catch (Exception e) {
+            log.warn("Rate limiting unavailable (Redis down?), allowing request: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);
