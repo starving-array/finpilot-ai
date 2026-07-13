@@ -1,6 +1,7 @@
 package com.idbi.fhss.scoring.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.idbi.fhss.scoring.dto.CustomerProfileResponse;
 import com.idbi.fhss.scoring.dto.ScoreResponse;
@@ -480,7 +481,7 @@ public class ScoringClientService {
             var prob = a.getConfidence() != null ? a.getConfidence().doubleValue() : 0.0;
             var composite = a.getCompositeScore() != null ? a.getCompositeScore().doubleValue() : 0.0;
             var features = a.getFeatures() != null
-                    ? objectMapper.readValue(a.getFeatures(), LinkedHashMap.class)
+                    ? objectMapper.readValue(a.getFeatures(), new TypeReference<Map<String, Double>>() {})
                     : Map.of();
             var loanAmount = a.getRequestedLoanAmount() != null
                     ? a.getRequestedLoanAmount().doubleValue() : null;
