@@ -1,0 +1,13 @@
+{$DOMAIN} {
+    reverse_proxy frontend:80
+
+    header /api/* {
+        +Access-Control-Allow-Origin "{$CORS_ORIGIN}"
+        +Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+        +Access-Control-Allow-Headers "Content-Type, Authorization, X-Request-ID"
+    }
+
+    log {
+        output file /data/logs/access.log
+    }
+}

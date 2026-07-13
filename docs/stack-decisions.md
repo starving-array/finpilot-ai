@@ -144,7 +144,7 @@ Jackson, Springdoc (OpenAPI), Micrometer + Prometheus
 | **React state** | Plain useState | Five states, one fetch - no state library justified |
 | **Gateway HTTP client** | Java 11 HttpClient | Avoids Apache/OkHttp dependency; sufficient for single internal call |
 | **PostgreSQL port** | Exposed only for development | Removed from docker-compose for demo; internal Docker network only |
-| **Label thresholds** | Stricter for training (0.84/0.78/0.70) vs production (0.70/0.50/0.30) | Model should learn to discriminate more finely than the production thresholds |
+| **Label thresholds** | Aligned training and production thresholds (0.80/0.65/0.45) | Previously had mismatch (training 0.84/0.78/0.70 vs production 0.70/0.50/0.30). Unified to avoid confusion — model trains and scores against same boundaries. Higher thresholds risked rejecting borderline-but-acceptable customers |
 
 ---
 
@@ -162,13 +162,13 @@ Jackson, Springdoc (OpenAPI), Micrometer + Prometheus
 
 ### SHAP Explainer Type
 
-**Chosen**: `KernelExplainer` (model-agnostic)
+**Chosen**: `TreeExplainer` (model-specific, O(TLD) complexity)
 
-**Trade-off**: ~30s per prediction vs TreeExplainer's ~300ms. But KernelExplainer works with any sklearn model.
+**Trade-off**: Coupled to tree-based models (GradientBoostingRegressor). ~300ms per prediction.
 
-**Alternative considered**: `TreeExplainer` (model-specific, O(TLD) complexity)
+**Alternative considered**: `KernelExplainer` (model-agnostic)
 
-**Why chosen**: KernelExplainer is the only SHAP variant that works reliably with scikit-learn's multi-class GBM across SHAP versions. TreeExplainer has version-specific compatibility issues. With 350 profiles and demo-only usage, 30s per prediction is acceptable.
+**Why chosen**: KernelExplainer was initially selected for multi-class GBM compatibility but caused ~30s per prediction — problematic with 350 profiles and circuit breaker timeout. After switching to `GradientBoostingRegressor` (regression → composite score), TreeExplainer works natively without version-specific issues, delivering 100× faster inference.
 
 ### Monorepo vs Microservices
 
@@ -246,7 +246,7 @@ Jackson, Springdoc (OpenAPI), Micrometer + Prometheus
 | Limitation | Impact | Mitigation |
 |------------|--------|------------|
 | **Synthetic data** (350 profiles) | Model may not generalize to real MSME data | Pipeline is designed to accept real data without code changes; retrain on IDBI sandbox post-shortlist |
-| **SHAP KernelExplainer** | ~30s per prediction (vs TreeExplainer's ~300ms) | Acceptable for demo; migrate to TreeExplainer if compatible with model version |
+| **SHAP TreeExplainer** | ~300ms per prediction | Migrated from KernelExplainer (~30s) during prototype — compatible with GradientBoostingRegressor |
 | **No authentication** | Anyone who can reach the gateway can score customers | Prototype runs on internal Docker network; documented for production |
 | **Single-region** | All services on one host | Acceptable for prototype; production would require multi-region deployment |
 | **No bulk operations** | Cannot score multiple customers at once | Deliberate - no bulk-export endpoints per data confidentiality rules |
@@ -255,12 +255,10 @@ Jackson, Springdoc (OpenAPI), Micrometer + Prometheus
 
 | Limitation | Location | Details |
 |------------|----------|---------|
-| **Hardcoded thresholds** | `feature_engineering.py` | Should import from `config.py` (config values exist but are decorative) |
 | **Dockerfiles run as root** | Multiple Dockerfiles | Acceptable for prototype; should add `USER` directive for production |
 | **CORS allow_origins=["*"]** | ML service `main.py` | Should restrict to backend URL (internal network, acceptable for prototype) |
 | **Error leakage** | ML service `router.py` | Uses `str(e)` in error responses; should log and return generic message |
 | **Dead code** | `predictor.py`, `training/feature_engineering.py` | Legacy 17-feature pipeline; should be removed |
-| **Classification report** | `train_model.py` | Uses wrong `CATEGORY_ORDER` for display labels (doesn't affect predictions) |
 
 ### Data Limitations
 

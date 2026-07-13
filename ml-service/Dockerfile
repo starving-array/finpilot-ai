@@ -1,5 +1,4 @@
 FROM python:3.11-slim
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Install Python dependencies first (layer cache)
@@ -18,7 +17,8 @@ RUN chmod +x /entrypoint.sh
 
 EXPOSE 8000
 # Health: model_loaded=false is valid in degraded mode (no model file)
+# Use Python built-in urllib instead of curl (avoids apt dependency)
 HEALTHCHECK --interval=10s --timeout=5s --retries=10 --start-period=30s \
-  CMD curl -f http://localhost:8000/health || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
