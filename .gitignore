@@ -51,7 +51,7 @@ Thumbs.db
 
 # Generated
 synthetic-data/output/
-ml-service/models/*.joblib
+# ml-service/models/*.joblib  # committed for deployment
 
 # Session / scratch files
 projectreport*.md
